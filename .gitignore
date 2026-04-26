@@ -1,0 +1,7 @@
+/*
+!/.gitignore
+!/src/
+!/src/**
+
+# Python cache inside src should not be committed.
+src/__pycache__/
