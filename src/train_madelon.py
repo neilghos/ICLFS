@@ -1,12 +1,25 @@
 import torch
-from madelon_data import get_madelon_loaders
+from pathlib import Path
+import csv
+from data import get_dataset_bundle
 from models import InvertedFeatureExpert
 from loss import contrastive_loss
-from visualization import visualize_feature_clusters, visualize_patient_clusters
-from downstream_task import run_slam_dunk_battle
+from extractor import get_feature_scores, get_topk_feature_indices
+from visualization import visualize_feature_clusters
 import numpy as np
+import data_loaders  # Registers dataset adapters.
 
-def train_icl(model, train_loader, val_loader, test_loader, labels, epochs=100):
+def train_icl(
+    model,
+    train_loader,
+    val_loader,
+    test_loader,
+    labels,
+    epochs=100,
+    checkpoint_path="checkpoints/madelon_last.pt",
+    top_k=20,
+    feature_list_path="checkpoints/madelon_topk_features.csv",
+):
     """
     Train the Inverted Contrastive Learning model on Madelon.
     """
@@ -19,7 +32,6 @@ def train_icl(model, train_loader, val_loader, test_loader, labels, epochs=100):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
         
-    y_train, y_val, y_test = labels
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
     model.train()
     
@@ -46,35 +58,47 @@ def train_icl(model, train_loader, val_loader, test_loader, labels, epochs=100):
             
         if epoch % 20 == 0:
             print(f"Epoch {epoch:03d} | Loss: {epoch_loss/len(train_loader):.4f}")
-            
     print("Madelon Training Complete.")
-    
-    # 1. Feature Manifold Visualization
-    print("Generating feature manifold visualization...")
-    visualize_feature_clusters(model, train_loader, filename="madelon_features.png")
-    
-    # 2. Validation Manifold Visualization
-    print("Generating validation manifold visualization...")
-    visualize_patient_clusters(model, val_loader, train_loader, y_val, 
-                               title="Madelon Validation Manifold", filename="madelon_val.png")
-    
-    # 3. Test Manifold Visualization
-    print("Generating test manifold visualization...")
-    visualize_patient_clusters(model, test_loader, train_loader, y_test, 
-                               title="Madelon Test Manifold", filename="madelon_test.png")
-    
-    # 4. Downstream Evaluation Battle
-    run_slam_dunk_battle(model, train_loader, val_loader, test_loader, labels)
+
+    checkpoint_file = Path(checkpoint_path)
+    checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "state_dict": model.state_dict(),
+            "dataset": "madelon",
+            "epochs": epochs,
+            "latent_dim": getattr(model.encoder[-1], "out_features", None),
+            "n_heads": model.attention.num_heads,
+        },
+        checkpoint_file,
+    )
+    print(f"Saved checkpoint to {checkpoint_file}")
+
+    visualize_feature_clusters(
+        model,
+        train_loader,
+        filename="feature_manifold.png",
+        dataset_name="madelon",
+    )
+
+    feature_list_file = Path(feature_list_path)
+    feature_list_file.parent.mkdir(parents=True, exist_ok=True)
+    feature_scores = get_feature_scores(model, train_loader)
+    top_k_indices = get_topk_feature_indices(feature_scores, top_k)
+    with feature_list_file.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["rank", "feature_index", "score"])
+        for rank, feature_idx in enumerate(top_k_indices, start=1):
+            writer.writerow([rank, int(feature_idx), float(feature_scores[feature_idx])])
+    print(f"Saved top-{top_k} feature list to {feature_list_file}")
 
 if __name__ == "__main__":
-    # 1. Setup Data
-    train_loader, val_loader, test_loader, labels = get_madelon_loaders()
-    
-    # 2. Setup Model
-    sample_v1, _ = next(iter(train_loader))
-    input_dim = sample_v1.shape[1]
+    bundle = get_dataset_bundle("madelon")
+    train_loader = bundle.train_loader
+    val_loader = bundle.val_loader
+    test_loader = bundle.test_loader
+    labels = bundle.labels
+    input_dim = bundle.num_train_samples
     
     model = InvertedFeatureExpert(n_patients=input_dim)
-    
-    # 3. Start Training
     train_icl(model, train_loader, val_loader, test_loader, labels, epochs=100)

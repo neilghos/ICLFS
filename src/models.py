@@ -12,7 +12,7 @@ class InvertedFeatureExpert(nn.Module):
         # 2. Encoder Backbone (Distills the 'Identity')
         self.encoder = nn.Sequential(
             nn.Linear(n_patients, 1024),
-            nn.BatchNorm1d(1024),
+            nn.BatchNorm1d(1024,momentum=0.01, eps=1e-5),
             nn.LeakyReLU(0.2),
             nn.Dropout(0.1),
             nn.Linear(1024, latent_dim)
@@ -21,6 +21,7 @@ class InvertedFeatureExpert(nn.Module):
         # 3. Projection Head (For the Contrastive Task)
         self.projector = nn.Sequential(
             nn.Linear(latent_dim, 128),
+            nn.BatchNorm1d(128, momentum=0.01, eps=1e-5),
             nn.ReLU(),
             nn.Linear(128, 128)
         )

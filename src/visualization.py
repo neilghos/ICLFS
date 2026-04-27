@@ -1,10 +1,30 @@
 import torch
+from pathlib import Path
 import matplotlib.pyplot as plt
+import matplotlib.colors as colors
+import seaborn as sns
 from sklearn.manifold import TSNE
-from sklearn.datasets import load_breast_cancer
+
+PLOTS_DIR = Path("/home/utsab/Desktop/ICL/Plots")
+
+
+def _resolve_plot_path(filename, dataset_name=None):
+    plot_path = Path(filename)
+    if not plot_path.is_absolute():
+        base_dir = PLOTS_DIR / dataset_name if dataset_name else PLOTS_DIR
+        plot_path = base_dir / plot_path
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
+    return plot_path
+
 
 @torch.no_grad()
-def visualize_feature_clusters(model, loader, feature_names=None, filename="feature_manifold.png"):
+def visualize_feature_clusters(
+    model,
+    loader,
+    feature_names=None,
+    filename="feature_manifold.png",
+    dataset_name=None,
+):
     """
     Project feature embeddings to 2D for visualization.
     """
@@ -32,56 +52,48 @@ def visualize_feature_clusters(model, loader, feature_names=None, filename="feat
     plt.ylabel("TSNE-2")
     plt.grid(True, alpha=0.3)
     
-    # Save the plot
-    plt.savefig("feature_manifold.png")
-    print("Saved feature manifold visualization to feature_manifold.png")
+    plot_path = _resolve_plot_path(filename, dataset_name=dataset_name)
+    plt.savefig(plot_path)
+    print(f"Saved feature manifold visualization to {plot_path}")
     plt.close()
 
+
 @torch.no_grad()
-def transform_patients(model, x_standard, train_loader):
+def visualize_attention_heatmap(
+    model,
+    loader,
+    title="Feature Attention Map",
+    filename="attention_heatmap_log.png",
+    dataset_name=None,
+):
     """
-    Project standard patient vectors onto the learned Inverted Manifold.
+    Visualize attention weights when the model forward path returns them.
     """
     model.eval()
     device = next(model.parameters()).device
-    
-    # 1. Get the feature embeddings (the new basis)
-    # The train_loader (inverted) contains the features as samples
-    v_train, _ = next(iter(train_loader))
-    E_f, _ = model(v_train.to(device)) 
-    
-    # 2. Project patients [N, 30] @ [30, 64] -> [N, 64]
-    z_manifold = torch.mm(x_standard.to(device), E_f)
-    
-    return z_manifold.cpu().numpy()
 
-@torch.no_grad()
-def visualize_patient_clusters(model, data_loader, train_loader, y_labels, title="Patient Manifold", filename="patient_manifold.png"):
-    """
-    Visualize how patients cluster in the ICL-derived manifold.
-    """
-    # 1. Get ALL data to match label size
-    x_list = []
-    for x in data_loader:
-        x_list.append(x)
-    x_full = torch.cat(x_list, dim=0)
-    
-    # 2. Transform to ICL manifold
-    z_full = transform_patients(model, x_full, train_loader)
-    
-    # 3. TSNE for visualization
-    tsne = TSNE(n_components=2, perplexity=10, random_state=42)
-    z_2d = tsne.fit_transform(z_full)
-    
-    # 4. Plot
-    plt.figure(figsize=(10, 8))
-    scatter = plt.scatter(z_2d[:, 0], z_2d[:, 1], c=y_labels, cmap='coolwarm', alpha=0.8)
-    plt.colorbar(scatter, label='Diagnosis (0: Malignant, 1: Benign)')
-    plt.title(title)
-    plt.xlabel("ICL-TSNE 1")
-    plt.ylabel("ICL-TSNE 2")
-    plt.grid(True, alpha=0.3)
-    
-    plt.savefig(filename)
-    print(f"Saved {title} to {filename}")
+    v1, _ = next(iter(loader))
+    v1 = v1.to(device)
+    outputs = model(v1)
+    if not isinstance(outputs, tuple) or len(outputs) < 3:
+        raise ValueError("Model does not return attention weights needed for heatmap visualization.")
+
+    attn_weights = outputs[2]
+    attn_matrix = attn_weights.mean(dim=0).cpu().numpy()
+
+    eps = 1e-8
+    plt.figure(figsize=(12, 10))
+    sns.heatmap(
+        attn_matrix + eps,
+        norm=colors.LogNorm(vmin=attn_matrix.min() + eps, vmax=attn_matrix.max()),
+        cmap="magma",
+        cbar=True,
+    )
+    plt.title(f"{title} (Log Scale - Multi-Head Avg)")
+    plt.xlabel("Key Features")
+    plt.ylabel("Query Features")
+
+    plot_path = _resolve_plot_path(filename, dataset_name=dataset_name)
+    plt.savefig(plot_path)
+    print(f"Attention Heatmap saved to {plot_path}")
     plt.close()

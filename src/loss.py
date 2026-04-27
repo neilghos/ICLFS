@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-def contrastive_loss(z1, z2, temperature=0.1):
+def contrastive_loss(z1, z2, temperature=0.07):
     """
     Numerically stable InfoNCE loss using CrossEntropy.
     """
