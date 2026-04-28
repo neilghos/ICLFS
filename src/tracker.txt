@@ -1,0 +1,48 @@
+ICL paper-style clustering tracker
+Date: 2026-04-29
+
+Protocol
+- Full-dataset unsupervised evaluation
+- Feature-count sweep: 50, 100, 150, 200, 250, 300
+- Report the best average clustering accuracy over the sweep
+- KMeans runs per k: 20
+- Output metric focus: AccuracyMean, NMIMean
+
+Current ICL hyperparameters
+- epochs: 100
+- seed: 42
+- latent_dim: 512
+- n_heads: 1
+- optimizer: Adam(lr=1e-3, weight_decay=1e-4)
+- contrastive temperature: 0.1
+- inverted loader batch size: full-batch over features
+- mask_prob passed to InvertedFeatureDataset: 0.15
+- augmentor strategy: four_view_mask
+
+Current config.yaml augmentor values
+- light_keep_ratio: 0.90
+- heavy_keep_ratio: 0.60
+- subset_keep_ratio: 0.50
+- complementary_overlap_ratio: 0.20
+
+Current ICL results
+
+COIL20
+- best k: 300
+- AccuracyMean: 0.658160
+- AccuracyStd: 0.038917
+- NMIMean: 0.774497
+- NMIStd: 0.016044
+- status: beats current reproduced baseline suite / SOTA target in our protocol
+
+Yale
+- best k: 300
+- AccuracyMean: 0.47181818181818186
+- AccuracyStd: 0.033813348193720595
+- NMIMean: 0.5557262323126626
+- NMIStd: 0.0215796463308104
+
+Notes
+- Higher MHSA head counts were observed to reduce performance; current best setting is n_heads=1.
+- Temperature sweep did not beat 0.10; keep temperature fixed at 0.10.
+- These runs are from icl_eval.py / sweep_icl.py under the paper-style full-dataset protocol.

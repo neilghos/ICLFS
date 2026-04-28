@@ -2,6 +2,25 @@ import numpy as np
 import torch
 
 
+def _anchor_view(batch):
+    if isinstance(batch, (tuple, list)):
+        return batch[0]
+    return batch
+
+
+@torch.no_grad()
+def get_feature_embeddings(model, train_loader):
+    """
+    Return the learned embedding for each original feature using the anchor view.
+    """
+    model.eval()
+    device = next(model.parameters()).device
+    batch = next(iter(train_loader))
+    anchor = _anchor_view(batch)
+    embeddings, _ = model(anchor.to(device))
+    return embeddings.cpu().numpy()
+
+
 @torch.no_grad()
 def get_feature_scores(model, train_loader):
     """
@@ -9,8 +28,9 @@ def get_feature_scores(model, train_loader):
     """
     model.eval()
     device = next(model.parameters()).device
-    v1, _ = next(iter(train_loader))
-    embeddings, _ = model(v1.to(device))
+    batch = next(iter(train_loader))
+    anchor = _anchor_view(batch)
+    embeddings, _ = model(anchor.to(device))
     return torch.norm(embeddings, p=2, dim=1).cpu().numpy()
 
 

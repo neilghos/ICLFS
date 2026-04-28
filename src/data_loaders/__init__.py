@@ -1,9 +1,9 @@
-from .madelon_data import get_madelon_loaders, load_madelon_raw
-from .winconsin_data import get_wisconsin_loaders, load_wisconsin_raw
+from .coil20_data import get_coil20_loaders, load_coil20_raw
+from .yale_data import get_yale_loaders, load_yale_raw
 
 __all__ = [
-    "get_madelon_loaders",
-    "get_wisconsin_loaders",
-    "load_madelon_raw",
-    "load_wisconsin_raw",
+    "get_coil20_loaders",
+    "load_coil20_raw",
+    "get_yale_loaders",
+    "load_yale_raw",
 ]

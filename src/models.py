@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 
 class InvertedFeatureExpert(nn.Module):
-    def __init__(self, n_patients, latent_dim=64, n_heads=5):
+    def __init__(self, n_patients, latent_dim=512, n_heads=5):
         super().__init__()
-        
+
         # 1. Relational Attention Layer
         # Input: (D_features, N_patients)
         self.attention = nn.MultiheadAttention(embed_dim=n_patients, num_heads=n_heads)
