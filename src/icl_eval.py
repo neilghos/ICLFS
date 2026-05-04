@@ -34,7 +34,7 @@ def parse_args():
     parser.add_argument("--kmeans-runs", type=int, default=PAPER_NUM_KMEANS_RUNS)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--latent-dim", type=int, default=512)
-    parser.add_argument("--n-heads", type=int, default=5)
+    parser.add_argument("--n-heads", type=int, default=15)
     parser.add_argument("--temperature", type=float, default=0.1)
     parser.add_argument(
         "--out",
@@ -137,20 +137,28 @@ def train_and_rank_features(
     for epoch in range(epochs):
         epoch_loss = 0.0
         for batch in loader:
+            # batch is [Anchor, Pos1, Pos2, Pos3, Pos4, Neg]
             views = [view.to(device) for view in batch]
             anchor = views[0]
-
-            _, z_anchor = model(anchor)
-            losses = []
-            for positive_view in views[1:]:
-                _, z_positive = model(positive_view)
-                losses.append(contrastive_loss(z_anchor, z_positive, temperature=temperature))
-
-            loss = torch.stack(losses).mean()
+            pos_views = views[1:5]
+            neg_view = views[5]
+            
             optimizer.zero_grad()
-            loss.backward()
+            
+            # Memory Optimization: Process views one-by-one and accumulate gradients
+            # This prevents holding 4+ massive relational graphs in memory at once
+            num_pos = len(pos_views)
+            for v in pos_views:
+                _, z_anchor = model(anchor)
+                _, z_neg = model(neg_view)
+                _, z_v = model(v)
+                
+                loss = contrastive_loss(z_anchor, z_v, temperature=temperature, z_neg=z_neg)
+                loss_scaled = loss / num_pos
+                loss_scaled.backward()
+                epoch_loss += loss_scaled.item()
+            
             optimizer.step()
-            epoch_loss += loss.item()
 
         if epoch % 20 == 0 or epoch == epochs - 1:
             print(f"ICL Epoch {epoch:03d} | Loss: {epoch_loss / len(loader):.4f}")

@@ -18,21 +18,24 @@ class InvertedFeatureExpert(nn.Module):
             nn.Linear(1024, latent_dim)
         )
         
-        # 3. Projection Head (For the Contrastive Task)
+        # 3. Projection Head (3-layer MLP like SimCLR v2)
         self.projector = nn.Sequential(
-            nn.Linear(latent_dim, 128),
+            nn.Linear(latent_dim, 256),
+            nn.BatchNorm1d(256, momentum=0.01, eps=1e-5),
+            nn.ReLU(),
+            nn.Linear(256, 128),
             nn.BatchNorm1d(128, momentum=0.01, eps=1e-5),
             nn.ReLU(),
             nn.Linear(128, 128)
         )
 
-    def forward(self, x):
+    def forward(self, x, return_attn=False):
         # x shape: [D_features, N_patients]
         
         # Self-Attention across features to find relational dependencies
         # Needs shape [Seq_Len, Batch, Dim] -> [D, 1, N]
         x_attn = x.unsqueeze(1) 
-        attn_out, _ = self.attention(x_attn, x_attn, x_attn)
+        attn_out, attn_weights = self.attention(x_attn, x_attn, x_attn)
         x = attn_out.squeeze(1)
         
         # Extract Latent Basis
@@ -40,4 +43,7 @@ class InvertedFeatureExpert(nn.Module):
         
         # Map to Hypersphere
         z = self.projector(h)
+        
+        if return_attn:
+            return h, z, attn_weights
         return h, z

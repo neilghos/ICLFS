@@ -1,4 +1,3 @@
-import torch
 from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors

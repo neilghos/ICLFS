@@ -120,14 +120,29 @@ class MultiViewMaskLibrary:
 
 
 @dataclass
+class StructuralNegativeAugmentor:
+    """
+    Produces a 'broken' version of the feature by shuffling its patient values.
+    This serves as a negative view to force the model to respect relational order.
+    """
+    n_patients: int
+
+    def __call__(self, feat_vector: torch.Tensor) -> torch.Tensor:
+        # Shuffling patient order destroys the relational context
+        perm = torch.randperm(self.n_patients)
+        return feat_vector[perm]
+
+
+@dataclass
 class FourViewMaskAugmentor:
     """
-    Anchor + 4 positive masked views:
-    - original feature profile
+    Anchor + 4 positive masked views + 1 structural negative view:
+    - original feature profile (anchor)
     - light mask
     - heavy mask
     - complementary subset A
     - complementary subset B
+    - SHUFFLED NEGATIVE
     """
 
     n_patients: int
@@ -144,10 +159,12 @@ class FourViewMaskAugmentor:
             subset_keep_ratio=self.subset_keep_ratio,
             complementary_overlap_ratio=self.complementary_overlap_ratio,
         )
+        self.negative_gen = StructuralNegativeAugmentor(n_patients=self.n_patients)
 
     def __call__(self, feat_vector: torch.Tensor):
         views = self.library.build_four_positive_views(feat_vector)
-        return (feat_vector, *views)
+        neg_view = self.negative_gen(feat_vector)
+        return (feat_vector, *views, neg_view)
 
 
 def build_augmentor(

@@ -8,16 +8,15 @@ Protocol
 - KMeans runs per k: 20
 - Output metric focus: AccuracyMean, NMIMean
 
-Current ICL hyperparameters
+Current GLOBAL ICL hyperparameters
 - epochs: 100
 - seed: 42
 - latent_dim: 512
-- n_heads: 1
 - optimizer: Adam(lr=1e-3, weight_decay=1e-4)
 - contrastive temperature: 0.1
 - inverted loader batch size: full-batch over features
-- mask_prob passed to InvertedFeatureDataset: 0.15
-- augmentor strategy: four_view_mask
+- augmentor strategy: four_view_mask + negative pair.
+
 
 Current config.yaml augmentor values
 - light_keep_ratio: 0.90
@@ -25,24 +24,124 @@ Current config.yaml augmentor values
 - subset_keep_ratio: 0.50
 - complementary_overlap_ratio: 0.20
 
-Current ICL results
+
+Current ICL results with shallow contrastive projector
+
+# 3. Projection Head (For the Contrastive Task)
+self.projector = nn.Sequential(
+    nn.Linear(latent_dim, 128),
+    nn.BatchNorm1d(128, momentum=0.01, eps=1e-5),
+    nn.ReLU(),
+    nn.Linear(128, 128)
+)
+
 
 COIL20
-- best k: 300
-- AccuracyMean: 0.658160
-- AccuracyStd: 0.038917
-- NMIMean: 0.774497
-- NMIStd: 0.016044
-- status: beats current reproduced baseline suite / SOTA target in our protocol
+- best k: 200
+- AccuracyMean: 0.676076
+- AccuracyStd: 0.028429
+- NMIMean: 0.774074
+- NMIStd: 0.01144
+hyperparameters:
+- epochs: 100
+- n_heads: 1
+beats sota by 4%
 
 Yale
+- best k: 200
+- AccuracyMean: 0.483939
+- AccuracyStd: 0.046088
+- NMIMean: 0.568994
+- NMIStd: 0.02588
+loses sota by 2%
+hyperparameters
+- epochs: 100
+- n_heads: 5
+
+tox171
+- best k: 50
+- AccuracyMean: 0.475439
+- AccuracyStd: 0.044541
+- NMIMean: 0.248319
+- NMIStd: 0.043594
+loses sota by 3%
+hyperparameters
+- epochs: 100
+- n_heads: 3
+
+
+Prostate
 - best k: 300
-- AccuracyMean: 0.47181818181818186
-- AccuracyStd: 0.033813348193720595
-- NMIMean: 0.5557262323126626
-- NMIStd: 0.0215796463308104
+- AccuracyMean: 0.634314 
+- AccuracyStd: 0.007001 
+- NMIMean: 0.057302 
+- NMIStd: 0.005493 
+beats sota by 3%
+hypterparameters
+- epochs: 50
+- n_heads: 1
+
+Current ICL results with deep contrastive projector
+
+# 3. Projection Head (3-layer MLP like SimCLR v2)
+self.projector = nn.Sequential(
+    nn.Linear(latent_dim, 256),
+    nn.BatchNorm1d(256, momentum=0.01, eps=1e-5),
+    nn.ReLU(),
+    nn.Linear(256, 128),
+    nn.BatchNorm1d(128, momentum=0.01, eps=1e-5),
+    nn.ReLU(),
+    nn.Linear(128, 128)
+)
+COIL20
+- best k: 250
+- AccuracyMean: 0.619896
+- AccuracyStd: 0.042988
+- NMIMean: 0.756071
+- NMIStd: 0.018029
+hyperparameters:
+- epochs: 100
+- n_heads: 1
+behind sota by 4%
+
+Yale
+- best k: 200
+- AccuracyMean: 0.477879
+- AccuracyStd: 0.033922
+- NMIMean: 0.546208
+- NMIStd: 0.020474
+loses sota by 3%
+hyperparameters
+- epochs: 100
+- n_heads: 15
+
+tox171
+- best k: 100
+- AccuracyMean: 0.484795
+- AccuracyStd: 0.024317
+- NMIMean: 0.27012
+- NMIStd: 0.016708
+loses sota by 2%
+hyperparameters
+- epochs: 100
+- n_heads: 1
+
+
+Prostate
+- best k: 50
+- AccuracyMean: 0.665686 
+- AccuracyStd: 0.018833 
+- NMIMean: 0.098791 
+- NMIStd: 0.027688 
+Beats sota by 6%
+hypterparameters
+- epochs: 100
+- n_heads: 1
+
+
 
 Notes
 - Higher MHSA head counts were observed to reduce performance; current best setting is n_heads=1.
 - Temperature sweep did not beat 0.10; keep temperature fixed at 0.10.
+- The live default path must keep the original augmentation implementation; intermediate ablation-path edits changed COIL20 performance and were not accepted as the default.
 - These runs are from icl_eval.py / sweep_icl.py under the paper-style full-dataset protocol.

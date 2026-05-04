@@ -1,23 +1,26 @@
 import torch
 import torch.nn.functional as F
 
-def contrastive_loss(z1, z2, temperature=0.1):
+def contrastive_loss(z1, z2, temperature=0.1, z_neg=None):
     """
-    Numerically stable InfoNCE loss using CrossEntropy.
+    Enhanced InfoNCE loss with optional hard negative support.
+    If z_neg is provided, it is treated as a dedicated negative for its corresponding anchor.
     """
-    batch_size = z1.size(0)
-    z = torch.cat([z1, z2], dim=0)
-    z = F.normalize(z, dim=1)
+    z1 = F.normalize(z1, dim=1)
+    z2 = F.normalize(z2, dim=1)
     
-    # Similarity matrix
-    logits = torch.mm(z, z.t()) / temperature
+    # Similarity between anchors (z1) and positives (z2)
+    logits = torch.mm(z1, z2.t()) / temperature  # Shape: [Batch, Batch]
     
-    # Create mask to remove self-similarity (diagonal)
-    mask = torch.eye(2 * batch_size, device=z.device).bool()
-    logits = logits.masked_fill(mask, -1e9)
-    
-    # For every sample i, the positive pair is (i + batch_size) or (i - batch_size)
-    targets = torch.arange(2 * batch_size, device=z.device)
-    targets = (targets + batch_size) % (2 * batch_size)
-    
+    if z_neg is not None:
+        z_neg = F.normalize(z_neg, dim=1)
+        # Similarity between each anchor and its specific negative view
+        # We only care about the diagonal (anchor i vs negative i)
+        neg_sim = torch.sum(z1 * z_neg, dim=1, keepdim=True) / temperature # Shape: [Batch, 1]
+        
+        # Add the specific negative similarity as an extra column in the logits
+        # Now each row has [Batch] positive candidates and [1] hard negative candidate
+        logits = torch.cat([logits, neg_sim], dim=1) # Shape: [Batch, Batch + 1]
+        
+    targets = torch.arange(z1.shape[0], device=z1.device)
     return F.cross_entropy(logits, targets)
