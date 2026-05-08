@@ -1,6 +1,24 @@
 import torch
 import torch.nn.functional as F
 
+def diversity_loss(z):
+    """
+    Forces feature embeddings to be de-correlated (Redundancy Pruning).
+    Calculates the cross-correlation matrix and penalizes off-diagonal elements.
+    """
+    z = F.normalize(z, dim=1)
+    batch_size = z.size(0)
+    
+    # Compute correlation matrix [B, B]
+    corr = torch.mm(z, z.t())
+    
+    # Penalty for off-diagonal elements (redundancy)
+    # We want corr to be close to the Identity matrix
+    identity = torch.eye(batch_size, device=z.device)
+    loss = (corr - identity).pow(2).mean()
+    return loss
+
+
 def contrastive_loss(z1, z2, temperature=0.1, z_neg=None):
     """
     Enhanced InfoNCE loss with optional hard negative support.

@@ -139,9 +139,166 @@ hypterparameters
 - n_heads: 1
 
 
+#ICL reuslts with residual projector
 
-Notes
-- Higher MHSA head counts were observed to reduce performance; current best setting is n_heads=1.
-- Temperature sweep did not beat 0.10; keep temperature fixed at 0.10.
-- The live default path must keep the original augmentation implementation; intermediate ablation-path edits changed COIL20 performance and were not accepted as the default.
-- These runs are from icl_eval.py / sweep_icl.py under the paper-style full-dataset protocol.
+
+class ResidualProjector(nn.Module):
+    def __init__(self, latent_dim, hidden_dim=256, out_dim=128):
+        super().__init__()
+        self.l1 = nn.Sequential(
+            nn.Linear(latent_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim, momentum=0.01, eps=1e-5),
+            nn.ReLU()
+        )
+        self.l2 = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim, momentum=0.01, eps=1e-5),
+            nn.ReLU()
+        )
+        self.l3 = nn.Linear(hidden_dim, out_dim)
+
+    def forward(self, x):
+        h1 = self.l1(x)
+        h2 = self.l2(h1)
+        # Residual connection allows 'shallow' path to persist
+        return self.l3(h1 + h2)
+
+COIL20
+- best k: 250
+- AccuracyMean: 0.603819
+- AccuracyStd: 0.023901
+- NMIMean: 0.71728
+- NMIStd: 0.01381
+hyperparameters:
+- epochs: 100
+- n_heads: 1
+behind sota by 5%
+
+Yale
+- best k: 150
+- AccuracyMean: 0.502121
+- AccuracyStd: 0.031156
+- NMIMean: 0.580997
+- NMIStd: 0.019913
+loses sota by 1%
+hyperparameters
+- epochs: 100
+- n_heads: 5
+
+
+tox171
+- best k: 150
+- AccuracyMean: 0.468713
+- AccuracyStd: 0.021269
+- NMIMean: 0.251573
+- NMIStd: 0.020146
+loses sota by 4%
+hyperparameters
+- epochs: 150
+- n_heads: 1
+
+Prostate
+- best k: 50
+- AccuracyMean: 0.706863 
+- AccuracyStd: 0.009755 
+- NMIMean: 0.162553 
+- NMIStd: 0.012094 
+beats sota by 10%
+hypterparameters
+- epochs: 100
+- n_heads: 1
+
+
+#ICL reuslts with residual projector + diversity loss
+
+COIL20
+- best k: 250
+- AccuracyMean: 0.633368
+- AccuracyStd: 0.040257
+- NMIMean: 0.743709
+- NMIStd: 0.015651
+behind sota by 2%
+hyperparameters:
+- epochs: 100
+- n_heads: 1
+
+Yale
+- best k: 150
+- AccuracyMean: 0.501818
+- AccuracyStd: 0.031585
+- NMIMean: 0.578235
+- NMIStd: 0.018169
+loses sota by 2%
+hyperparameters
+- epochs: 100
+- n_heads: 5
+
+tox171
+- best k: 150
+- AccuracyMean: 0.463158
+- AccuracyStd: 0.021053
+- NMIMean: 0.254282
+- NMIStd: 0.018952
+behind sota by 4%
+hyperparameters
+- epochs: 100
+- n_heads: 1
+
+
+Prostate
+- best k: 50
+- AccuracyMean: 0.706863 
+- AccuracyStd: 0.009755 
+- NMIMean: 0.162553 
+- NMIStd: 0.012094 
+beats sota by 10%
+hypterparameters
+- epochs: 100
+- n_heads: 1
+
+#ICL reuslts with residual projector + diversity loss + temperature decay
+
+COIL20
+- best k: 250
+- AccuracyMean: 0.633368
+- AccuracyStd: 0.040257
+- NMIMean: 0.743709
+- NMIStd: 0.015651
+behind sota by 2%
+hyperparameters:
+- epochs: 100
+- n_heads: 1
+
+Yale
+- best k: 200
+- AccuracyMean: 0.515455
+- AccuracyStd: 0.033166
+- NMIMean: 0.597149
+- NMIStd: 0.0209
+beats sota by 1%
+hyperparameters
+- epochs: 100
+- n_heads: 5
+
+tox171
+- best k: 200
+- AccuracyMean: 0.461404
+- AccuracyStd: 0.01704
+- NMIMean: 0.247946
+- NMIStd: 0.014729
+behind sota by 4%
+hyperparameters
+- epochs: 100
+- n_heads: 1
+
+
+Prostate
+- best k: 50
+- AccuracyMean: 0.681373 
+- AccuracyStd: 0.007271 
+- NMIMean: 0.110415 
+- NMIStd: 0.015568 
+beats sota by 8%
+hypterparameters
+- epochs: 100
+- n_heads: 1

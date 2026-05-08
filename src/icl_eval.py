@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 import data_loaders  # noqa: F401
 from data.api import DATASET_REGISTRY, InvertedFeatureDataset
 from extractor import get_feature_scores, get_topk_feature_indices
-from loss import contrastive_loss
+from loss import contrastive_loss, diversity_loss
 from models import InvertedFeatureExpert
 
 
@@ -35,7 +35,11 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--latent-dim", type=int, default=512)
     parser.add_argument("--n-heads", type=int, default=15)
-    parser.add_argument("--temperature", type=float, default=0.1)
+    parser.add_argument("--temperature", type=float, default=0.05, help="Starting temperature.")
+    parser.add_argument("--temperature-end", type=float, default=None, 
+                        help="Final temperature. If provided, temperature will linearly decay.")
+    parser.add_argument("--diversity-weight", type=float, default=0.005,
+                        help="Weight for the redundancy pruning (de-correlation) loss.")
     parser.add_argument(
         "--out",
         default=None,
@@ -122,6 +126,8 @@ def train_and_rank_features(
     latent_dim: int,
     n_heads: int,
     temperature: float,
+    temperature_end: float | None = None,
+    diversity_weight: float = 0.005,
 ) -> np.ndarray:
     set_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -136,6 +142,12 @@ def train_and_rank_features(
     model.train()
     for epoch in range(epochs):
         epoch_loss = 0.0
+        # Update temperature if scheduling is enabled
+        current_temp = temperature
+        if temperature_end is not None:
+            frac = epoch / max(1, epochs - 1)
+            current_temp = temperature + frac * (temperature_end - temperature)
+
         for batch in loader:
             # batch is [Anchor, Pos1, Pos2, Pos3, Pos4, Neg]
             views = [view.to(device) for view in batch]
@@ -146,17 +158,21 @@ def train_and_rank_features(
             optimizer.zero_grad()
             
             # Memory Optimization: Process views one-by-one and accumulate gradients
-            # This prevents holding 4+ massive relational graphs in memory at once
             num_pos = len(pos_views)
             for v in pos_views:
                 _, z_anchor = model(anchor)
                 _, z_neg = model(neg_view)
                 _, z_v = model(v)
                 
-                loss = contrastive_loss(z_anchor, z_v, temperature=temperature, z_neg=z_neg)
-                loss_scaled = loss / num_pos
-                loss_scaled.backward()
-                epoch_loss += loss_scaled.item()
+                # Task 1: Sovereignty (Contrastive)
+                l_con = contrastive_loss(z_anchor, z_v, temperature=current_temp, z_neg=z_neg)
+                
+                # Task 2: Diversity (Redundancy Pruning)
+                l_div = diversity_loss(z_anchor)
+                
+                total_loss = (l_con / num_pos) + (diversity_weight * l_div)
+                total_loss.backward()
+                epoch_loss += total_loss.item()
             
             optimizer.step()
 
@@ -192,6 +208,8 @@ def main():
         latent_dim=args.latent_dim,
         n_heads=args.n_heads,
         temperature=args.temperature,
+        temperature_end=args.temperature_end,
+        diversity_weight=args.diversity_weight,
     )
 
     rows = []

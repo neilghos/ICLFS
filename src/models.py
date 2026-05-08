@@ -1,6 +1,28 @@
 import torch
 import torch.nn as nn
 
+class ResidualProjector(nn.Module):
+    def __init__(self, latent_dim, hidden_dim=256, out_dim=128):
+        super().__init__()
+        self.l1 = nn.Sequential(
+            nn.Linear(latent_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim, momentum=0.01, eps=1e-5),
+            nn.ReLU()
+        )
+        self.l2 = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim, momentum=0.01, eps=1e-5),
+            nn.ReLU()
+        )
+        self.l3 = nn.Linear(hidden_dim, out_dim)
+
+    def forward(self, x):
+        h1 = self.l1(x)
+        h2 = self.l2(h1)
+        # Residual connection allows 'shallow' path to persist
+        return self.l3(h1 + h2)
+
+
 class InvertedFeatureExpert(nn.Module):
     def __init__(self, n_patients, latent_dim=512, n_heads=5):
         super().__init__()
@@ -18,30 +40,21 @@ class InvertedFeatureExpert(nn.Module):
             nn.Linear(1024, latent_dim)
         )
         
-        # 3. Projection Head (3-layer MLP like SimCLR v2)
-        self.projector = nn.Sequential(
-            nn.Linear(latent_dim, 256),
-            nn.BatchNorm1d(256, momentum=0.01, eps=1e-5),
-            nn.ReLU(),
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128, momentum=0.01, eps=1e-5),
-            nn.ReLU(),
-            nn.Linear(128, 128)
-        )
+        # 3. Residual Projection Head (Ablation #1)
+        self.projector = ResidualProjector(latent_dim)
 
     def forward(self, x, return_attn=False):
         # x shape: [D_features, N_patients]
         
         # Self-Attention across features to find relational dependencies
-        # Needs shape [Seq_Len, Batch, Dim] -> [D, 1, N]
         x_attn = x.unsqueeze(1) 
         attn_out, attn_weights = self.attention(x_attn, x_attn, x_attn)
-        x = attn_out.squeeze(1)
+        x_mixed = attn_out.squeeze(1)
         
-        # Extract Latent Basis
-        h = self.encoder(x)
+        # Encoder Backbone
+        h = self.encoder(x_mixed)
         
-        # Map to Hypersphere
+        # Residual Projector
         z = self.projector(h)
         
         if return_attn:
