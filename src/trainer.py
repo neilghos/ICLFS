@@ -12,8 +12,6 @@ from visualization import visualize_feature_clusters
 import data_loaders  # Registers dataset adapters.
 
 
-def _save_checkpoint(model, checkpoint_path, dataset_name, epochs):
-    return
 
 
 def _epoch_path(path_template, epoch):
@@ -51,9 +49,7 @@ def train_icl(
     plot_filename=None,
     dataset_name="madelon",
     seed=42,
-    visualize_each_epoch=False,
-    save_epoch_checkpoints=False,
-    save_first_epoch_checkpoint=False,
+    visualize_each_epoch=False
 ):
     """
     Train the Inverted Contrastive Learning model on a dataset.

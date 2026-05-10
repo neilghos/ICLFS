@@ -19,7 +19,6 @@ class ResidualProjector(nn.Module):
     def forward(self, x):
         h1 = self.l1(x)
         h2 = self.l2(h1)
-        # Residual connection allows 'shallow' path to persist
         return self.l3(h1 + h2)
 
 
