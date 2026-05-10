@@ -23,9 +23,9 @@ from data.api import DATASET_REGISTRY
 
 
 RESULTS_DIR = Path("/home/utsab/Desktop/ICLFE/ICLFE/src/results")
-PAPER_KS = (50, 100, 150, 200, 250, 300)
-PAPER_NUM_KMEANS_RUNS = 20
-PAPER_NUM_EPOCHS = 300
+KS = (50, 100, 150, 200, 250, 300)
+NUM_KMEANS_RUNS = 20
+NUM_EPOCHS = 300
 
 
 def parse_args():
@@ -41,8 +41,8 @@ def parse_args():
         help="Baseline methods to run.",
     )
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--kmeans-runs", type=int, default=PAPER_NUM_KMEANS_RUNS)
-    parser.add_argument("--epochs", type=int, default=PAPER_NUM_EPOCHS)
+    parser.add_argument("--kmeans-runs", type=int, default=NUM_KMEANS_RUNS)
+    parser.add_argument("--epochs", type=int, default=NUM_EPOCHS)
     parser.add_argument(
         "--out",
         default=None,
@@ -69,7 +69,7 @@ def load_full_dataset(dataset_name: str, seed: int) -> tuple[np.ndarray, np.ndar
 
 
 def valid_ks(num_features: int) -> list[int]:
-    return [k for k in PAPER_KS if k <= num_features]
+    return [k for k in KS if k <= num_features]
 
 
 def clustering_accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:

@@ -376,23 +376,3 @@ hypterparameters
 - n_heads: 1
 
 
-BEST SOTA: train shuffling false
-loss temperature = 0.05
-only contrastive, no div loss, no temeprature scheduling.
-Method,NumSelected,AccuracyMean,AccuracyStd,NMIMean,NMIStd
-ICL,50,0.701470588235294,0.004877389397581508,0.15575990943075776,0.005949750872611081 beats sota by 10%
-Dataset,Method,NumSelected,AccuracyMean,AccuracyStd,NMIMean,NMIStd
-coil20,ICL,300,0.6547916666666668,0.027962838407252638,0.7710983599431793,0.014647769965010372 beats sota by 2%
-Dataset,Method,NumSelected,AccuracyMean,AccuracyStd,NMIMean,NMIStd
-allaml,ICL,100,0.7222222222222221,1.1102230246251565e-16,0.1393868331681944,2.7755575615628914e-17 beats sota by 2%
-Dataset,Method,NumSelected,AccuracyMean,AccuracyStd,NMIMean,NMIStd
-yale,ICL,150,0.49666666666666676,0.039856261483368835,0.5714116982135443,0.019116568458949473 loses sota by 1% 3mh heads
-Dataset,Method,NumSelected,AccuracyMean,AccuracyStd,NMIMean,NMIStd
-tox171,ICL,200,0.47163742690058486,0.027756224325056783,0.2546376042635795,0.03679555586764667 loses sota by 3% 3mh heads
-
-Dataset,Method,NumSelected,AccuracyMean,AccuracyStd,NMIMean,NMIStd
-pixraw10p,ICL,300,0.677,0.04550824101193101,0.7311195476964735,0.029271119999629475 loses sota by 13% but
-with train shuffling = on
-Dataset,Method,NumSelected,AccuracyMean,AccuracyStd,NMIMean,NMIStd
-pixraw10p,ICL,250,0.8365,0.06835751604615255,0.9000754612694527,0.03200692148071158 matches sota.
-

@@ -8,12 +8,7 @@ def diversity_loss(z):
     """
     z = F.normalize(z, dim=1)
     batch_size = z.size(0)
-    
-    # Compute correlation matrix [B, B]
     corr = torch.mm(z, z.t())
-    
-    # Penalty for off-diagonal elements (redundancy)
-    # We want corr to be close to the Identity matrix
     identity = torch.eye(batch_size, device=z.device)
     loss = (corr - identity).pow(2).mean()
     return loss

@@ -17,21 +17,17 @@ DATASET_REGISTRY: Dict[str, DatasetLoader] = {}
 
 
 class InvertedFeatureDataset(Dataset):
-    """
-    Full-dataset training view where each item is one feature profile across samples.
-    """
 
     def __init__(
         self,
         x: np.ndarray,
-        augmentor_strategy: str = "four_view_mask",
         augmentor_config: dict | None = None,
     ):
         self.x = torch.from_numpy(x.T).float()
         self.n_patients = self.x.shape[1]
         self.augmentor = build_augmentor(
             n_patients=self.n_patients,
-            strategy=augmentor_strategy,
+            strategy="four_view_mask",
             config=augmentor_config,
         )
 
@@ -77,23 +73,17 @@ def build_dataset_bundle(
     x: np.ndarray,
     y: np.ndarray,
     *,
-    augmentor_strategy: str | None = None,
     config_path: str | None = None,
 ) -> DatasetBundle:
-    """
-    Current paper path: full-dataset standardization + full-dataset inverted loader.
-    """
+
 
     x = StandardScaler().fit_transform(np.asarray(x, dtype=np.float32)).astype(np.float32)
     y = _normalize_labels(y)
 
     augmentor_config = get_augmentor_config(config_path)
-    if augmentor_strategy is None:
-        augmentor_strategy = augmentor_config.get("strategy", "four_view_mask")
 
     train_ds = InvertedFeatureDataset(
         x,
-        augmentor_strategy=augmentor_strategy,
         augmentor_config=augmentor_config,
     )
     train_loader = DataLoader(train_ds, batch_size=len(train_ds), shuffle=False)
@@ -112,7 +102,7 @@ def build_dataset_bundle(
 
 def get_dataset_bundle(name: str, **kwargs) -> DatasetBundle:
     if name not in DATASET_REGISTRY:
-        import data_loaders  # noqa: F401
+        import data_loaders 
 
     if name not in DATASET_REGISTRY:
         available = ", ".join(sorted(DATASET_REGISTRY)) or "<none>"
@@ -121,7 +111,7 @@ def get_dataset_bundle(name: str, **kwargs) -> DatasetBundle:
     x, y = DATASET_REGISTRY[name](**kwargs)
     bundle_kwargs = {
         key: kwargs[key]
-        for key in ("augmentor_strategy", "config_path")
+        for key in ("config_path",)
         if key in kwargs
     }
     return build_dataset_bundle(name, x, y, **bundle_kwargs)
