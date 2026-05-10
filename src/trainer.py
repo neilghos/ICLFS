@@ -44,9 +44,6 @@ def _get_feature_names(dataset_name):
 def train_icl(
     model,
     train_loader,
-    val_loader=None,
-    test_loader=None,
-    labels=None,
     epochs=1,
     checkpoint_path=None,
     top_k=100,
@@ -142,13 +139,10 @@ def train_icl(
 if __name__ == "__main__":
     dataset_name = "madelon"
     bundle = get_dataset_bundle(dataset_name)
-    model = InvertedFeatureExpert(n_patients=bundle.num_train_samples)
+    model = InvertedFeatureExpert(n_patients=bundle.num_samples)
     train_icl(
         model,
         bundle.train_loader,
-        bundle.val_loader,
-        bundle.test_loader,
-        bundle.labels,
         epochs=1,
         checkpoint_path=f"checkpoints/{dataset_name}_last.pt",
         top_k=20,

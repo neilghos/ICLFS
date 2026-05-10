@@ -24,4 +24,4 @@ register_dataset("yale", load_yale_raw)
 
 def get_yale_loaders(**kwargs):
     bundle = get_dataset_bundle("yale", **kwargs)
-    return bundle.train_loader, bundle.val_loader, bundle.test_loader, bundle.labels
+    return bundle.train_loader, bundle.labels
