@@ -31,13 +31,6 @@ def _default_plot_filename(dataset_name):
     return f"{dataset_name}_feature_manifold.png"
 
 
-def _get_feature_names(dataset_name):
-    if dataset_name == "sonar":
-        from data_loaders.sonar_data import get_sonar_feature_names
-
-        return get_sonar_feature_names()
-    return None
-
 
 def train_icl(
     model,

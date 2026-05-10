@@ -109,7 +109,6 @@ def evaluate_selected_features(
 def build_inverted_loader(x: np.ndarray) -> DataLoader:
     train_ds = InvertedFeatureDataset(
         x,
-        mask_prob=0.15,
         augmentor_strategy="four_view_mask",
         augmentor_config={},
     )

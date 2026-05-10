@@ -47,28 +47,6 @@ def _sample_subset_pair(
 
 
 @dataclass
-class RandomMaskAugmentor:
-    """
-    Default two-view augmentor for inverted feature profiles.
-
-    The current task remains unchanged: for each feature profile across
-    patients, generate two independently masked views. All future masking/task
-    redesigns should happen in this module so the training path stays agnostic.
-    """
-
-    n_patients: int
-    mask_prob: float = 0.0
-
-    def _sample_mask(self) -> torch.Tensor:
-        return (torch.rand(self.n_patients) > self.mask_prob).float()
-
-    def __call__(self, feat_vector: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        mask1 = self._sample_mask()
-        mask2 = self._sample_mask()
-        return feat_vector * mask1, feat_vector * mask2
-
-
-@dataclass
 class MultiViewMaskLibrary:
     """
     Library of candidate positive-view maskers for future contrastive-task
@@ -88,10 +66,6 @@ class MultiViewMaskLibrary:
 
     def heavy_mask(self, feat_vector: torch.Tensor) -> torch.Tensor:
         mask = _sample_keep_mask(self.n_patients, keep_ratio=self.heavy_keep_ratio)
-        return feat_vector * mask
-
-    def subset_mask(self, feat_vector: torch.Tensor) -> torch.Tensor:
-        mask = _sample_keep_mask(self.n_patients, keep_ratio=self.subset_keep_ratio)
         return feat_vector * mask
 
     def complementary_subset_pair(
@@ -170,17 +144,10 @@ class FourViewMaskAugmentor:
 def build_augmentor(
     *,
     n_patients: int,
-    mask_prob: float = 0.0,
     strategy: str = "four_view_mask",
     config: dict | None = None,
 ):
     config = config or {}
-    if strategy == "random_mask":
-        random_mask_cfg = config.get("random_mask", {})
-        return RandomMaskAugmentor(
-            n_patients=n_patients,
-            mask_prob=random_mask_cfg.get("mask_prob", mask_prob),
-        )
     if strategy == "four_view_mask":
         four_view_cfg = config.get("four_view_mask", {})
         return FourViewMaskAugmentor(

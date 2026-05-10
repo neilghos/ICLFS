@@ -24,7 +24,6 @@ class InvertedFeatureDataset(Dataset):
     def __init__(
         self,
         x: np.ndarray,
-        mask_prob: float = 0.15,
         augmentor_strategy: str = "four_view_mask",
         augmentor_config: dict | None = None,
     ):
@@ -32,7 +31,6 @@ class InvertedFeatureDataset(Dataset):
         self.n_patients = self.x.shape[1]
         self.augmentor = build_augmentor(
             n_patients=self.n_patients,
-            mask_prob=mask_prob,
             strategy=augmentor_strategy,
             config=augmentor_config,
         )
@@ -79,7 +77,6 @@ def build_dataset_bundle(
     x: np.ndarray,
     y: np.ndarray,
     *,
-    mask_prob: float = 0.15,
     augmentor_strategy: str | None = None,
     config_path: str | None = None,
 ) -> DatasetBundle:
@@ -96,7 +93,6 @@ def build_dataset_bundle(
 
     train_ds = InvertedFeatureDataset(
         x,
-        mask_prob=mask_prob,
         augmentor_strategy=augmentor_strategy,
         augmentor_config=augmentor_config,
     )
@@ -125,7 +121,7 @@ def get_dataset_bundle(name: str, **kwargs) -> DatasetBundle:
     x, y = DATASET_REGISTRY[name](**kwargs)
     bundle_kwargs = {
         key: kwargs[key]
-        for key in ("mask_prob", "augmentor_strategy", "config_path")
+        for key in ("augmentor_strategy", "config_path")
         if key in kwargs
     }
     return build_dataset_bundle(name, x, y, **bundle_kwargs)
