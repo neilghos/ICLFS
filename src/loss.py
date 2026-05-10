@@ -19,7 +19,7 @@ def diversity_loss(z):
     return loss
 
 
-def contrastive_loss(z1, z2, temperature=0.1, z_neg=None):
+def contrastive_loss(z1, z2, temperature=0.05, z_neg=None):
     """
     Enhanced InfoNCE loss with optional hard negative support.
     If z_neg is provided, it is treated as a dedicated negative for its corresponding anchor.

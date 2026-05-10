@@ -14,7 +14,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import normalized_mutual_info_score
 from sklearn.preprocessing import StandardScaler
 from skfeature.function.similarity_based import lap_score
-from skfeature.function.sparse_learning_based import MCFS, NDFS
+from skfeature.function.sparse_learning_based import MCFS, NDFS, UDFS
 from skfeature.utility.construct_W import construct_W
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -169,6 +169,20 @@ def ndfs_select(
         )
     finally:
         sklearn_cluster.KMeans = original_kmeans
+    ranking = np.asarray(ranking).astype(int).reshape(-1)
+    return ranking[:k_selected]
+
+
+def udfs_select(
+    x: np.ndarray,
+    k_selected: int,
+    num_clusters: int,
+) -> np.ndarray:
+    ranking = UDFS.udfs(
+        x,
+        mode="rank",
+        n_clusters=num_clusters,
+    )
     ranking = np.asarray(ranking).astype(int).reshape(-1)
     return ranking[:k_selected]
 

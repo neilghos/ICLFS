@@ -34,7 +34,7 @@ def parse_args():
     parser.add_argument("--kmeans-runs", type=int, default=PAPER_NUM_KMEANS_RUNS)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--latent-dim", type=int, default=512)
-    parser.add_argument("--n-heads", type=int, default=15)
+    parser.add_argument("--n-heads", type=int, default=1)
     parser.add_argument("--temperature", type=float, default=0.05, help="Starting temperature.")
     parser.add_argument("--temperature-end", type=float, default=None, 
                         help="Final temperature. If provided, temperature will linearly decay.")
