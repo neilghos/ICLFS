@@ -36,12 +36,12 @@ def parse_args():
     parser.add_argument("--latent-dim", type=int, default=512)
     parser.add_argument("--n-heads", type=int, default=1)
     parser.add_argument("--temperature", type=float, default=0.05)
-    parser.add_argument("--diversity-weight", type=float, default=0.005,
+    parser.add_argument("--diversity-weight", type=float, default=0.01,
                         help="Weight for the redundancy pruning (de-correlation) loss.")
     parser.add_argument(
         "--out",
         default=None,
-        help="Optional CSV output path. Defaults to results/icl_<dataset>.csv",
+        help="Optional summary CSV output path. Defaults to results/icl_<dataset>_summary.csv",
     )
     return parser.parse_args()
 
@@ -230,14 +230,11 @@ def main():
     ]
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = Path(args.out or RESULTS_DIR / f"icl_{args.dataset}.csv")
-    summary_path = out_path.with_name(out_path.stem + "_summary.csv")
-    raw_df.to_csv(out_path, index=False)
+    summary_path = Path(args.out or RESULTS_DIR / f"icl_{args.dataset}_summary.csv")
     summary_df.to_csv(summary_path, index=False)
 
     print("\nSummary")
     print(summary_df.to_string(index=False))
-    print(f"\nSaved raw ICL sweep to {out_path}")
     print(f"Saved summary ICL table to {summary_path}")
 
 
