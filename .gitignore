@@ -2,6 +2,7 @@
 !/.gitignore
 !/src/
 !/src/**
+!/config.yaml
 
 # Python cache inside src should not be committed.
 src/__pycache__/
@@ -11,3 +12,12 @@ src/**/*.pyo
 src/checkpoints
 src/results
 src/data
+src/baseline.py
+src/baseline_runner.py
+src/tracker.txt
+src/udfs_runner.py
+/src/sweep_diversity.py
+src/feature_list
+src/mechanism_probe_plots.py
+src/mechanism_probe.py
+/src/ufe_baselines.py
