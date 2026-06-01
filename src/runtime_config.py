@@ -24,7 +24,19 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
 
 def get_augmentor_config(config_path: str | Path | None = None) -> dict[str, Any]:
     config = load_config(config_path)
-    augmentor = config.get("augmentor", {})
-    if not isinstance(augmentor, dict):
-        raise ValueError("config.yaml: 'augmentor' must be a mapping.")
-    return augmentor
+    augmentor = config.get("augmentor")
+    if augmentor is not None:
+        if not isinstance(augmentor, dict):
+            raise ValueError("config.yaml: 'augmentor' must be a mapping.")
+        return augmentor
+
+    # Backward-compatibility: allow the older top-level shape
+    # four_view_mask:
+    #   ...
+    four_view_mask = config.get("four_view_mask")
+    if four_view_mask is not None:
+        if not isinstance(four_view_mask, dict):
+            raise ValueError("config.yaml: 'four_view_mask' must be a mapping.")
+        return {"four_view_mask": four_view_mask}
+
+    return {}

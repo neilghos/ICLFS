@@ -18,6 +18,7 @@ from data.api import DATASET_REGISTRY, InvertedFeatureDataset
 from extractor import get_feature_scores, get_topk_feature_indices
 from loss import contrastive_loss, diversity_loss
 from models import InvertedFeatureExpert
+from runtime_config import get_augmentor_config
 
 
 RESULTS_DIR = Path("/home/utsab/Desktop/ICLFE/ICLFE/src/results")
@@ -35,9 +36,14 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--latent-dim", type=int, default=512)
     parser.add_argument("--n-heads", type=int, default=1)
-    parser.add_argument("--temperature", type=float, default=0.05)
-    parser.add_argument("--diversity-weight", type=float, default=0.01,
+    parser.add_argument("--temperature", type=float, default=0.03)
+    parser.add_argument("--diversity-weight", type=float, default=0.35,
                         help="Weight for the redundancy pruning (de-correlation) loss.")
+    parser.add_argument(
+        "--config-path",
+        default=None,
+        help="Optional path to config.yaml. Defaults to the repo config.yaml.",
+    )
     parser.add_argument(
         "--out",
         default=None,
@@ -106,10 +112,10 @@ def evaluate_selected_features(
     }
 
 
-def build_inverted_loader(x: np.ndarray) -> DataLoader:
+def build_inverted_loader(x: np.ndarray, config_path: str | None = None) -> DataLoader:
     train_ds = InvertedFeatureDataset(
         x,
-        augmentor_config={},
+        augmentor_config=get_augmentor_config(config_path),
     )
     return DataLoader(train_ds, batch_size=len(train_ds), shuffle=False)
 
@@ -123,10 +129,11 @@ def train_and_rank_features(
     n_heads: int,
     temperature: float,
     diversity_weight: float = 0.005,
+    config_path: str | None = None,
 ) -> np.ndarray:
     set_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    loader = build_inverted_loader(x)
+    loader = build_inverted_loader(x, config_path=config_path)
     model = InvertedFeatureExpert(
         n_patients=x.shape[0],
         latent_dim=latent_dim,
@@ -199,6 +206,7 @@ def main():
         n_heads=args.n_heads,
         temperature=args.temperature,
         diversity_weight=args.diversity_weight,
+        config_path=args.config_path,
     )
 
     rows = []

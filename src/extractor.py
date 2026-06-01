@@ -24,14 +24,14 @@ def get_feature_embeddings(model, train_loader):
 @torch.no_grad()
 def get_feature_scores(model, train_loader):
     """
-    Score each original feature by the norm of its learned embedding.
+    Score each original feature by the norm of its projector-space embedding.
     """
     model.eval()
     device = next(model.parameters()).device
     batch = next(iter(train_loader))
     anchor = _anchor_view(batch)
-    embeddings, _ = model(anchor.to(device))
-    return torch.norm(embeddings, p=2, dim=1).cpu().numpy()
+    _, projector_embeddings = model(anchor.to(device))
+    return torch.norm(projector_embeddings, p=2, dim=1).cpu().numpy()
 
 
 def get_topk_feature_indices(feature_scores, top_k):
