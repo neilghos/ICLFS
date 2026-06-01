@@ -10,7 +10,6 @@ src/**/__pycache__/
 src/**/*.py[cod]
 src/**/*.pyo
 src/checkpoints
-src/results
 src/results_diagnosis
 src/data
 src/baseline.py
