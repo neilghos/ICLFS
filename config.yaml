@@ -1,9 +1,5 @@
-augmentor:
-  strategy: four_view_mask
-  random_mask:
-    mask_prob: 0.10
-  four_view_mask:
-    light_keep_ratio: 0.90
-    heavy_keep_ratio: 0.60
-    subset_keep_ratio: 0.50
-    complementary_overlap_ratio: 0.20
+four_view_mask:
+  light_keep_ratio: 0.90
+  heavy_keep_ratio: 0.60
+  subset_keep_ratio: 0.50
+  complementary_overlap_ratio: 0.10

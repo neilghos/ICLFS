@@ -1,0 +1,2 @@
+Dataset,Method,NumSelected,AccuracyMean,AccuracyStd,NMIMean,NMIStd
+relathe,ICL,50,0.5571128241065171,1.1102230246251565e-16,0.02379423492168775,0.0
