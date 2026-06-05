@@ -16,10 +16,14 @@ class ResidualProjector(nn.Module):
         )
         self.l3 = nn.Linear(hidden_dim, out_dim)
 
-    def forward(self, x):
+    def forward(self, x, return_hidden=False):
         h1 = self.l1(x)
         h2 = self.l2(h1)
-        return self.l3(h1 + h2)
+        h_proj = h1 + h2
+        z = self.l3(h_proj)
+        if return_hidden:
+            return h_proj, z
+        return z
 
 
 class InvertedFeatureExpert(nn.Module):
@@ -54,7 +58,7 @@ class InvertedFeatureExpert(nn.Module):
             out_dim=projector_out_dim,
         )
 
-    def forward(self, x, return_attn=False):
+    def forward(self, x, return_attn=False, return_projector_hidden=False):
         # x shape: [D_features, N_patients]
         
         # Self-Attention across features to find relational dependencies
@@ -66,8 +70,15 @@ class InvertedFeatureExpert(nn.Module):
         h = self.encoder(x_mixed)
         
         # Residual Projector
-        z = self.projector(h)
+        if return_projector_hidden:
+            h_proj, z = self.projector(h, return_hidden=True)
+        else:
+            z = self.projector(h)
         
         if return_attn:
+            if return_projector_hidden:
+                return h, z, attn_weights, h_proj
             return h, z, attn_weights
+        if return_projector_hidden:
+            return h, z, h_proj
         return h, z
