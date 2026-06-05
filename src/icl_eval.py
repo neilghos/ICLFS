@@ -24,20 +24,55 @@ from runtime_config import get_augmentor_config
 RESULTS_DIR = Path("/home/utsab/Desktop/ICLFE/ICLFE/src/results")
 PAPER_KS = (50, 100, 150, 200, 250, 300)
 PAPER_NUM_KMEANS_RUNS = 20
+PAPER_DATASETS = [
+    "allaml",
+    "arcene",
+    "basehock",
+    "coil20",
+    "lung",
+    "nci9",
+    "pcmac",
+    "prostate",
+    "relathe",
+    "warppie10p",
+]
+SHORT_DATASET_ARCH_DATASETS = {"allaml", "arcene", "lung", "nci9", "prostate", "warppie10p","orl"}
+SHORT_DATASET_ARCH_PRESET = {
+    "encoder_hidden_dim": 16,
+    "latent_dim": 512,
+    "projector_hidden_dim": 128,
+    "projector_output_dim": 16,
+    "diversity_weight": 0.20,
+}
+LARGE_DATASET_ARCH_DATASETS = {"basehock", "coil20", "pcmac", "relathe"}
+LARGE_DATASET_ARCH_PRESET = {
+    "encoder_hidden_dim": 64,
+    "latent_dim": 1440,
+    "projector_hidden_dim": 2048,
+    "projector_output_dim": 32,
+    "diversity_weight": 0.40,
+}
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Standalone ICL evaluator using the paper-style unsupervised clustering protocol."
     )
-    parser.add_argument("--dataset", required=True, help="Registered dataset name.")
+    parser.add_argument(
+        "--dataset",
+        default=None,
+        help="Registered dataset name. If omitted, runs the full hardcoded paper dataset list.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--kmeans-runs", type=int, default=PAPER_NUM_KMEANS_RUNS)
     parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--encoder-hidden-dim", type=int, default=1024)
     parser.add_argument("--latent-dim", type=int, default=512)
     parser.add_argument("--n-heads", type=int, default=1)
-    parser.add_argument("--temperature", type=float, default=0.03)
-    parser.add_argument("--diversity-weight", type=float, default=0.35,
+    parser.add_argument("--projector-hidden-dim", type=int, default=256)
+    parser.add_argument("--projector-output-dim", type=int, default=128)
+    parser.add_argument("--temperature", type=float, default=0.05)
+    parser.add_argument("--diversity-weight", type=float, default=0.40,
                         help="Weight for the redundancy pruning (de-correlation) loss.")
     parser.add_argument(
         "--config-path",
@@ -71,6 +106,27 @@ def load_full_dataset(dataset_name: str, seed: int) -> tuple[np.ndarray, np.ndar
 
 def valid_ks(num_features: int) -> list[int]:
     return [k for k in PAPER_KS if k <= num_features]
+
+
+def architecture_for_dataset(
+    dataset_name: str,
+    *,
+    encoder_hidden_dim: int,
+    latent_dim: int,
+    projector_hidden_dim: int,
+    projector_output_dim: int,
+) -> dict[str, int | float]:
+    if dataset_name in SHORT_DATASET_ARCH_DATASETS:
+        return dict(SHORT_DATASET_ARCH_PRESET)
+    if dataset_name in LARGE_DATASET_ARCH_DATASETS:
+        return dict(LARGE_DATASET_ARCH_PRESET)
+    return {
+        "encoder_hidden_dim": encoder_hidden_dim,
+        "latent_dim": latent_dim,
+        "projector_hidden_dim": projector_hidden_dim,
+        "projector_output_dim": projector_output_dim,
+        "diversity_weight": None,
+    }
 
 
 def clustering_accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -125,8 +181,11 @@ def train_and_rank_features(
     *,
     epochs: int,
     seed: int,
+    encoder_hidden_dim: int,
     latent_dim: int,
     n_heads: int,
+    projector_hidden_dim: int,
+    projector_output_dim: int,
     temperature: float,
     diversity_weight: float = 0.005,
     config_path: str | None = None,
@@ -138,6 +197,9 @@ def train_and_rank_features(
         n_patients=x.shape[0],
         latent_dim=latent_dim,
         n_heads=n_heads,
+        encoder_hidden_dim=encoder_hidden_dim,
+        projector_hidden_dim=projector_hidden_dim,
+        projector_out_dim=projector_output_dim,
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
 
@@ -184,66 +246,107 @@ def train_and_rank_features(
 def main():
     args = parse_args()
     set_seed(args.seed)
-
-    x, y = load_full_dataset(args.dataset, args.seed)
-    n_clusters = np.unique(y).shape[0]
-    ks = valid_ks(x.shape[1])
-    if not ks:
-        raise ValueError(
-            f"No valid paper-style feature counts for dataset with {x.shape[1]} features."
-        )
-
-    print(
-        f"Loaded {args.dataset}: {x.shape[0]} samples, {x.shape[1]} features, "
-        f"{n_clusters} clusters/classes"
-    )
-
-    ranking = train_and_rank_features(
-        x,
-        epochs=args.epochs,
-        seed=args.seed,
-        latent_dim=args.latent_dim,
-        n_heads=args.n_heads,
-        temperature=args.temperature,
-        diversity_weight=args.diversity_weight,
-        config_path=args.config_path,
-    )
-
-    rows = []
-    for k_selected in ks:
-        selected_idx = np.asarray(ranking[:k_selected], dtype=int)
-        metrics = evaluate_selected_features(
-            x,
-            y,
-            selected_idx,
-            num_clusters=n_clusters,
-            kmeans_runs=args.kmeans_runs,
-            seed=args.seed,
-        )
-        rows.append(
-            {
-                "Method": "ICL",
-                "NumSelected": k_selected,
-                **metrics,
-            }
-        )
-
-    raw_df = pd.DataFrame(rows).sort_values(
-        ["AccuracyMean", "NMIMean", "NumSelected"],
-        ascending=[False, False, True],
-    )
-    best = raw_df.iloc[0].to_dict()
-    summary_df = pd.DataFrame([{**best, "Dataset": args.dataset}])[
-        ["Dataset", "Method", "NumSelected", "AccuracyMean", "AccuracyStd", "NMIMean", "NMIStd"]
-    ]
-
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    summary_path = Path(args.out or RESULTS_DIR / f"icl_{args.dataset}_summary.csv")
-    summary_df.to_csv(summary_path, index=False)
+    datasets = [args.dataset] if args.dataset else list(PAPER_DATASETS)
+    unknown = sorted(set(datasets) - set(DATASET_REGISTRY))
+    if unknown:
+        raise ValueError(f"Unknown datasets requested: {', '.join(unknown)}")
 
-    print("\nSummary")
-    print(summary_df.to_string(index=False))
-    print(f"Saved summary ICL table to {summary_path}")
+    summary_rows = []
+    for dataset_name in datasets:
+        arch = architecture_for_dataset(
+            dataset_name,
+            encoder_hidden_dim=args.encoder_hidden_dim,
+            latent_dim=args.latent_dim,
+            projector_hidden_dim=args.projector_hidden_dim,
+            projector_output_dim=args.projector_output_dim,
+        )
+        diversity_weight = (
+            args.diversity_weight
+            if arch["diversity_weight"] is None
+            else float(arch["diversity_weight"])
+        )
+
+        x, y = load_full_dataset(dataset_name, args.seed)
+        n_clusters = np.unique(y).shape[0]
+        ks = valid_ks(x.shape[1])
+        if not ks:
+            raise ValueError(
+                f"No valid paper-style feature counts for dataset with {x.shape[1]} features."
+            )
+
+        print(
+            f"Loaded {dataset_name}: {x.shape[0]} samples, {x.shape[1]} features, "
+            f"{n_clusters} clusters/classes"
+        )
+        print(
+            "Architecture preset | "
+            f"encoder_hidden_dim={arch['encoder_hidden_dim']} "
+            f"latent_dim={arch['latent_dim']} "
+            f"projector_hidden_dim={arch['projector_hidden_dim']} "
+            f"projector_output_dim={arch['projector_output_dim']} "
+            f"diversity_weight={diversity_weight}"
+        )
+
+        ranking = train_and_rank_features(
+            x,
+            epochs=args.epochs,
+            seed=args.seed,
+            encoder_hidden_dim=arch["encoder_hidden_dim"],
+            latent_dim=arch["latent_dim"],
+            n_heads=args.n_heads,
+            projector_hidden_dim=arch["projector_hidden_dim"],
+            projector_output_dim=arch["projector_output_dim"],
+            temperature=args.temperature,
+            diversity_weight=diversity_weight,
+            config_path=args.config_path,
+        )
+
+        rows = []
+        for k_selected in ks:
+            selected_idx = np.asarray(ranking[:k_selected], dtype=int)
+            metrics = evaluate_selected_features(
+                x,
+                y,
+                selected_idx,
+                num_clusters=n_clusters,
+                kmeans_runs=args.kmeans_runs,
+                seed=args.seed,
+            )
+            rows.append(
+                {
+                    "Method": "ICL",
+                    "NumSelected": k_selected,
+                    **metrics,
+                }
+            )
+
+        raw_df = pd.DataFrame(rows).sort_values(
+            ["AccuracyMean", "NMIMean", "NumSelected"],
+            ascending=[False, False, True],
+        )
+        best = raw_df.iloc[0].to_dict()
+        summary_df = pd.DataFrame([{**best, "Dataset": dataset_name}])[
+            ["Dataset", "Method", "NumSelected", "AccuracyMean", "AccuracyStd", "NMIMean", "NMIStd"]
+        ]
+        summary_rows.append(summary_df.iloc[0].to_dict())
+
+        summary_path = RESULTS_DIR / f"icl_{dataset_name}_summary.csv"
+        summary_df.to_csv(summary_path, index=False)
+
+        print("\nSummary")
+        print(summary_df.to_string(index=False))
+        print(f"Saved summary ICL table to {summary_path}")
+
+    if len(summary_rows) > 1:
+        combined_df = pd.DataFrame(summary_rows)[
+            ["Dataset", "Method", "NumSelected", "AccuracyMean", "AccuracyStd", "NMIMean", "NMIStd"]
+        ]
+        combined_path = Path(args.out or RESULTS_DIR / "icl_all_summary.csv")
+        combined_df.to_csv(combined_path, index=False)
+        print("\nCombined Summary")
+        print(combined_df.to_string(index=False))
+        print(f"Saved combined ICL table to {combined_path}")
 
 
 if __name__ == "__main__":

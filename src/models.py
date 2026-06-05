@@ -23,7 +23,15 @@ class ResidualProjector(nn.Module):
 
 
 class InvertedFeatureExpert(nn.Module):
-    def __init__(self, n_patients, latent_dim=512, n_heads=5):
+    def __init__(
+        self,
+        n_patients,
+        latent_dim=512,
+        n_heads=5,
+        encoder_hidden_dim=1024,
+        projector_hidden_dim=256,
+        projector_out_dim=128,
+    ):
         super().__init__()
 
         # 1. Relational Attention Layer
@@ -32,15 +40,19 @@ class InvertedFeatureExpert(nn.Module):
         
         # 2. Encoder Backbone (Distills the 'Identity')
         self.encoder = nn.Sequential(
-            nn.Linear(n_patients, 1024),
-            nn.BatchNorm1d(1024,momentum=0.01, eps=1e-5),
+            nn.Linear(n_patients, encoder_hidden_dim),
+            nn.BatchNorm1d(encoder_hidden_dim, momentum=0.01, eps=1e-5),
             nn.LeakyReLU(0.2),
             nn.Dropout(0.1),
-            nn.Linear(1024, latent_dim)
+            nn.Linear(encoder_hidden_dim, latent_dim)
         )
         
         # 3. Residual Projection Head (Ablation #1)
-        self.projector = ResidualProjector(latent_dim)
+        self.projector = ResidualProjector(
+            latent_dim,
+            hidden_dim=projector_hidden_dim,
+            out_dim=projector_out_dim,
+        )
 
     def forward(self, x, return_attn=False):
         # x shape: [D_features, N_patients]

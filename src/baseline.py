@@ -37,7 +37,7 @@ def parse_args():
         "--methods",
         nargs="*",
         default=["LS", "MCFS", "NDFS", "CAE", "LSCAE"],
-        choices=["LS", "MCFS", "NDFS", "CAE", "LSCAE"],
+        choices=["LS", "MCFS", "NDFS", "UDFS", "CAE", "LSCAE"],
         help="Baseline methods to run.",
     )
     parser.add_argument("--seed", type=int, default=42)
@@ -173,9 +173,9 @@ def ndfs_select(
     return ranking[:k_selected]
 
 
-def udfs_select(
+def udfs_ranking(
     x: np.ndarray,
-    k_selected: int,
+    *,
     num_clusters: int,
 ) -> np.ndarray:
     ranking = UDFS.udfs(
@@ -183,7 +183,18 @@ def udfs_select(
         mode="rank",
         n_clusters=num_clusters,
     )
-    ranking = np.asarray(ranking).astype(int).reshape(-1)
+    return np.asarray(ranking).astype(int).reshape(-1)
+
+
+def udfs_select(
+    x: np.ndarray,
+    k_selected: int,
+    num_clusters: int,
+) -> np.ndarray:
+    ranking = udfs_ranking(
+        x,
+        num_clusters=num_clusters,
+    )
     return ranking[:k_selected]
 
 
@@ -241,6 +252,8 @@ def select_features(
         return mcfs_select(x, k_selected, num_clusters, seed, W)
     if method == "NDFS":
         return ndfs_select(x, k_selected, num_clusters, seed, W)
+    if method == "UDFS":
+        return udfs_select(x, k_selected, num_clusters)
     if method == "CAE":
         return lscae_select(x, k_selected, model_name="cae", epochs=epochs, seed=seed)
     if method == "LSCAE":
@@ -259,17 +272,21 @@ def run_method(
 ) -> tuple[pd.DataFrame, dict]:
     n_clusters = np.unique(y).shape[0]
     W = build_affinity_graph(x) if method in {"LS", "MCFS", "NDFS"} else None
+    udfs_full_ranking = udfs_ranking(x, num_clusters=n_clusters) if method == "UDFS" else None
     rows = []
     for k_selected in valid_ks(x.shape[1]):
-        selected_idx = select_features(
-            method,
-            x,
-            k_selected=k_selected,
-            num_clusters=n_clusters,
-            epochs=epochs,
-            seed=seed,
-            W=W,
-        )
+        if method == "UDFS":
+            selected_idx = udfs_full_ranking[:k_selected]
+        else:
+            selected_idx = select_features(
+                method,
+                x,
+                k_selected=k_selected,
+                num_clusters=n_clusters,
+                epochs=epochs,
+                seed=seed,
+                W=W,
+            )
         metrics = evaluate_selected_features(
             x,
             y,
