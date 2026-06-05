@@ -25,10 +25,10 @@ RESULTS_DIR = Path("/home/utsab/Desktop/ICLFE/ICLFE/src/results")
 PAPER_KS = (50, 100, 150, 200, 250, 300)
 PAPER_NUM_KMEANS_RUNS = 20
 PAPER_DATASETS = [
+    "coil20",
     "allaml",
     "arcene",
     "basehock",
-    "coil20",
     "lung",
     "nci9",
     "pcmac",
