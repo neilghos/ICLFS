@@ -21,7 +21,7 @@ from models import InvertedFeatureExpert
 from runtime_config import get_augmentor_config
 
 
-RESULTS_DIR = Path("/home/utsab/Desktop/ICLFE/ICLFE/src/results")
+RESULTS_DIR = Path(__file__).resolve().parent / "results"
 PAPER_KS = (50, 100, 150, 200, 250, 300)
 PAPER_NUM_KMEANS_RUNS = 20
 PAPER_DATASETS = [

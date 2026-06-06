@@ -8,7 +8,7 @@ from scipy.io import loadmat
 from data import register_dataset
 
 
-PATH = Path("/home/utsab/Desktop/ICLFE/ICLFE/data/warpPIE10P.mat")
+PATH = Path(__file__).resolve().parents[2] / "data" / "warpPIE10P.mat"
 
 
 def load_warppie10p_raw(**_) -> tuple[np.ndarray, np.ndarray]:

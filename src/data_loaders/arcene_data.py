@@ -8,7 +8,7 @@ from scipy.io import loadmat
 from data import register_dataset
 
 
-PATH = Path("/home/utsab/Desktop/ICLFE/ICLFE/data/arcene.mat")
+PATH = Path(__file__).resolve().parents[2] / "data" / "arcene.mat"
 
 
 def load_arcene_raw(**_) -> tuple[np.ndarray, np.ndarray]:

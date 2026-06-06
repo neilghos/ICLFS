@@ -8,7 +8,7 @@ from scipy.io import loadmat
 from data import register_dataset
 
 
-PATH = Path("/home/utsab/Desktop/ICLFE/ICLFE/data/PCMAC.mat")
+PATH = Path(__file__).resolve().parents[2] / "data" / "PCMAC.mat"
 
 
 def load_pcmac_raw(**_) -> tuple[np.ndarray, np.ndarray]:

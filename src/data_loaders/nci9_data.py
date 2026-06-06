@@ -8,7 +8,7 @@ from scipy.io import loadmat
 from data import register_dataset
 
 
-PATH = Path("/home/utsab/Desktop/ICLFE/ICLFE/data/nci9.mat")
+PATH = Path(__file__).resolve().parents[2] / "data" / "nci9.mat"
 
 
 def load_nci9_raw(**_) -> tuple[np.ndarray, np.ndarray]:
