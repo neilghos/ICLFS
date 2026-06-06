@@ -8,7 +8,7 @@ from scipy.io import loadmat
 from data import get_dataset_bundle, register_dataset
 
 
-COIL20_PATH = Path(__file__).resolve().parents[2] / "data" / "COIL20.mat"
+COIL20_PATH = Path(__file__).resolve().parents[2] / "dataset" / "COIL20.mat"
 
 
 def load_coil20_raw(**_) -> tuple[np.ndarray, np.ndarray]:

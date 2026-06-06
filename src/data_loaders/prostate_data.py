@@ -4,7 +4,7 @@ import numpy as np
 from scipy.io import loadmat
 from data import get_dataset_bundle, register_dataset
 
-PROSTATE_PATH = Path(__file__).resolve().parents[2] / "data" / "Prostate_GE.mat"
+PROSTATE_PATH = Path(__file__).resolve().parents[2] / "dataset" / "Prostate_GE.mat"
 
 def load_prostate_raw(**_) -> tuple[np.ndarray, np.ndarray]:
     print(f"Loading Prostate_GE from {PROSTATE_PATH}...")

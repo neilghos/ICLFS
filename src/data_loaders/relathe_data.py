@@ -8,7 +8,7 @@ from scipy.io import loadmat
 from data import register_dataset
 
 
-PATH = Path(__file__).resolve().parents[2] / "data" / "RELATHE.mat"
+PATH = Path(__file__).resolve().parents[2] / "dataset" / "RELATHE.mat"
 
 
 def load_relathe_raw(**_) -> tuple[np.ndarray, np.ndarray]:

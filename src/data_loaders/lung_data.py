@@ -8,7 +8,7 @@ from scipy.io import loadmat
 from data import register_dataset
 
 
-PATH = Path(__file__).resolve().parents[2] / "data" / "lung.mat"
+PATH = Path(__file__).resolve().parents[2] / "dataset" / "lung.mat"
 
 
 def load_lung_raw(**_) -> tuple[np.ndarray, np.ndarray]:

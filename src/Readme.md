@@ -1,11 +1,11 @@
-# ICLFS Code
+# ICLFE / ICLFS Code
 
 This directory contains the training and evaluation code for ICLFS, an
 inverted contrastive learning method for unsupervised feature selection.
 
 ## Datasets
 
-Place all benchmark `.mat` files in the repository `data/` directory. The
+Place all benchmark `.mat` files in the repository `dataset/` directory. The
 loaders expect these exact filenames:
 
 - `ALLAML.mat`
