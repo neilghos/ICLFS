@@ -3,6 +3,8 @@
 !/src/
 !/src/**
 !/config.yaml
+!/data/
+!/data/**
 
 # Python cache inside src should not be committed.
 src/__pycache__/
@@ -12,3 +14,5 @@ src/**/*.pyo
 src/checkpoints
 src/data
 
+# Keep the data directory structure, but do not track dataset payloads.
+data/*.mat
