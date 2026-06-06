@@ -16,14 +16,11 @@ class ResidualProjector(nn.Module):
         )
         self.l3 = nn.Linear(hidden_dim, out_dim)
 
-    def forward(self, x, return_hidden=False):
+    def forward(self, x):
         h1 = self.l1(x)
         h2 = self.l2(h1)
         h_proj = h1 + h2
-        z = self.l3(h_proj)
-        if return_hidden:
-            return h_proj, z
-        return z
+        return self.l3(h_proj)
 
 
 class InvertedFeatureExpert(nn.Module):
@@ -38,11 +35,10 @@ class InvertedFeatureExpert(nn.Module):
     ):
         super().__init__()
 
-        # 1. Relational Attention Layer
-        # Input: (D_features, N_patients)
+        # Attention mixes feature tokens before encoding.
         self.attention = nn.MultiheadAttention(embed_dim=n_patients, num_heads=n_heads)
         
-        # 2. Encoder Backbone (Distills the 'Identity')
+        # Encode each feature profile into the latent space.
         self.encoder = nn.Sequential(
             nn.Linear(n_patients, encoder_hidden_dim),
             nn.BatchNorm1d(encoder_hidden_dim, momentum=0.01, eps=1e-5),
@@ -51,34 +47,20 @@ class InvertedFeatureExpert(nn.Module):
             nn.Linear(encoder_hidden_dim, latent_dim)
         )
         
-        # 3. Residual Projection Head (Ablation #1)
         self.projector = ResidualProjector(
             latent_dim,
             hidden_dim=projector_hidden_dim,
             out_dim=projector_out_dim,
         )
 
-    def forward(self, x, return_attn=False, return_projector_hidden=False):
-        # x shape: [D_features, N_patients]
-        
-        # Self-Attention across features to find relational dependencies
+    def forward(self, x, return_attn=False):
         x_attn = x.unsqueeze(1) 
         attn_out, attn_weights = self.attention(x_attn, x_attn, x_attn)
         x_mixed = attn_out.squeeze(1)
-        
-        # Encoder Backbone
+
         h = self.encoder(x_mixed)
-        
-        # Residual Projector
-        if return_projector_hidden:
-            h_proj, z = self.projector(h, return_hidden=True)
-        else:
-            z = self.projector(h)
-        
+        z = self.projector(h)
+
         if return_attn:
-            if return_projector_hidden:
-                return h, z, attn_weights, h_proj
             return h, z, attn_weights
-        if return_projector_hidden:
-            return h, z, h_proj
         return h, z

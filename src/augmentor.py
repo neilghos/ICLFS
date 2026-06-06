@@ -6,6 +6,7 @@ import torch
 
 
 def _sample_keep_mask(n_patients: int, keep_ratio: float) -> torch.Tensor:
+    # Sample a binary mask that retains approximately keep_ratio of entries.
     keep_count = max(1, min(n_patients, int(round(n_patients * keep_ratio))))
     perm = torch.randperm(n_patients)
     mask = torch.zeros(n_patients, dtype=torch.float32)
@@ -18,6 +19,7 @@ def _sample_subset_pair(
     keep_ratio: float,
     overlap_ratio: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    # Build two subset masks with a controlled amount of shared support.
     keep_count = max(1, min(n_patients, int(round(n_patients * keep_ratio))))
     overlap_count = max(0, min(keep_count, int(round(keep_count * overlap_ratio))))
 
@@ -35,8 +37,6 @@ def _sample_subset_pair(
     mask2[overlap_idx] = 1.0
     mask1[first_unique] = 1.0
     mask2[second_unique] = 1.0
-
-    # If the second side runs short due to rounding, top it up from unused indices.
     if int(mask2.sum().item()) < keep_count:
         used = (mask1 + mask2) > 0
         unused = (~used).nonzero(as_tuple=False).flatten()
@@ -48,12 +48,6 @@ def _sample_subset_pair(
 
 @dataclass
 class MultiViewMaskLibrary:
-    """
-    Library of candidate positive-view maskers for future contrastive-task
-    redesigns. This does not yet change the main training path; it only exposes
-    named mask families we can sample from later.
-    """
-
     n_patients: int
     light_keep_ratio: float = 0.90
     heavy_keep_ratio: float = 0.60
@@ -95,10 +89,6 @@ class MultiViewMaskLibrary:
 
 @dataclass
 class StructuralNegativeAugmentor:
-    """
-    Produces a 'broken' version of the feature by shuffling its patient values.
-    This serves as a negative view to force the model to respect relational order.
-    """
     n_patients: int
 
     def __call__(self, feat_vector: torch.Tensor) -> torch.Tensor:
@@ -109,16 +99,6 @@ class StructuralNegativeAugmentor:
 
 @dataclass
 class FourViewMaskAugmentor:
-    """
-    Anchor + 4 positive masked views + 1 structural negative view:
-    - original feature profile (anchor)
-    - light mask
-    - heavy mask
-    - complementary subset A
-    - complementary subset B
-    - SHUFFLED NEGATIVE
-    """
-
     n_patients: int
     light_keep_ratio: float = 0.90
     heavy_keep_ratio: float = 0.60

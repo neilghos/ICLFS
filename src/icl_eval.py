@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 import data_loaders  # noqa: F401
 from data.api import DATASET_REGISTRY, InvertedFeatureDataset
 from extractor import get_feature_scores, get_topk_feature_indices
-from loss import contrastive_loss, diversity_loss
+from loss import contrastive_loss, decorrelation_loss
 from models import InvertedFeatureExpert
 from runtime_config import get_augmentor_config
 
@@ -36,7 +36,7 @@ PAPER_DATASETS = [
     "relathe",
     "warppie10p",
 ]
-SHORT_DATASET_ARCH_DATASETS = {"allaml", "arcene", "lung", "nci9", "prostate", "warppie10p","orl"}
+SHORT_DATASET_ARCH_DATASETS = {"allaml", "arcene", "lung", "nci9", "prostate", "warppie10p"}
 SHORT_DATASET_ARCH_PRESET = {
     "encoder_hidden_dim": 16,
     "latent_dim": 512,
@@ -56,7 +56,7 @@ LARGE_DATASET_ARCH_PRESET = {
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Standalone ICL evaluator using the paper-style unsupervised clustering protocol."
+        description="Standalone ICLFS evaluator using the paper-style unsupervised clustering protocol."
     )
     parser.add_argument(
         "--dataset",
@@ -82,7 +82,7 @@ def parse_args():
     parser.add_argument(
         "--out",
         default=None,
-        help="Optional summary CSV output path. Defaults to results/icl_<dataset>_summary.csv",
+        help="Optional summary CSV output path. Defaults to results/ICLFS_<dataset>_summary.csv",
     )
     return parser.parse_args()
 
@@ -227,7 +227,7 @@ def train_and_rank_features(
                 l_con = contrastive_loss(z_anchor, z_v, temperature=temperature, z_neg=z_neg)
                 
                 # Task 2: Diversity (Redundancy Pruning)
-                l_div = diversity_loss(z_anchor)
+                l_div = decorrelation_loss(z_anchor)
                 
                 total_loss = (l_con / num_pos) + (diversity_weight * l_div)
                 total_loss.backward()
@@ -236,7 +236,7 @@ def train_and_rank_features(
             optimizer.step()
 
         if epoch % 20 == 0 or epoch == epochs - 1:
-            print(f"ICL Epoch {epoch:03d} | Loss: {epoch_loss / len(loader):.4f}")
+            print(f"ICLFS Epoch {epoch:03d} | Loss: {epoch_loss / len(loader):.4f}")
 
     feature_scores = get_feature_scores(model, loader)
     max_k = max(valid_ks(x.shape[1]))
@@ -315,7 +315,7 @@ def main():
             )
             rows.append(
                 {
-                    "Method": "ICL",
+                    "Method": "ICLFS",
                     "NumSelected": k_selected,
                     **metrics,
                 }
@@ -331,22 +331,22 @@ def main():
         ]
         summary_rows.append(summary_df.iloc[0].to_dict())
 
-        summary_path = RESULTS_DIR / f"icl_{dataset_name}_summary.csv"
+        summary_path = RESULTS_DIR / f"ICLFS_{dataset_name}_summary.csv"
         summary_df.to_csv(summary_path, index=False)
 
         print("\nSummary")
         print(summary_df.to_string(index=False))
-        print(f"Saved summary ICL table to {summary_path}")
+        print(f"Saved summary ICLFS table to {summary_path}")
 
     if len(summary_rows) > 1:
         combined_df = pd.DataFrame(summary_rows)[
             ["Dataset", "Method", "NumSelected", "AccuracyMean", "AccuracyStd", "NMIMean", "NMIStd"]
         ]
-        combined_path = Path(args.out or RESULTS_DIR / "icl_all_summary.csv")
+        combined_path = Path(args.out or RESULTS_DIR / "ICLFS_all_summary.csv")
         combined_df.to_csv(combined_path, index=False)
         print("\nCombined Summary")
         print(combined_df.to_string(index=False))
-        print(f"Saved combined ICL table to {combined_path}")
+        print(f"Saved combined ICLFS table to {combined_path}")
 
 
 if __name__ == "__main__":

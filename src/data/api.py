@@ -23,6 +23,8 @@ class InvertedFeatureDataset(Dataset):
         x: np.ndarray,
         augmentor_config: dict | None = None,
     ):
+        # Convert sample-major input (n_samples, n_features) into feature-major
+        # tensors so each row is a feature profile over all samples.
         self.x = torch.from_numpy(x.T).float()
         self.n_patients = self.x.shape[1]
         self.augmentor = build_augmentor(
@@ -75,8 +77,7 @@ def build_dataset_bundle(
     *,
     config_path: str | None = None,
 ) -> DatasetBundle:
-
-
+    # Standardize the full dataset before constructing feature-wise instances.
     x = StandardScaler().fit_transform(np.asarray(x, dtype=np.float32)).astype(np.float32)
     y = _normalize_labels(y)
 
@@ -86,6 +87,7 @@ def build_dataset_bundle(
         x,
         augmentor_config=augmentor_config,
     )
+    # The full inverted feature set is processed jointly as one batch.
     train_loader = DataLoader(train_ds, batch_size=len(train_ds), shuffle=False)
 
     return DatasetBundle(
