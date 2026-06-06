@@ -5,6 +5,7 @@
 !/config.yaml
 !/dataset/
 !/dataset/**
+!/requirements.txt 
 
 # Python cache inside src should not be committed.
 src/__pycache__/

@@ -3,7 +3,15 @@
 This directory contains the training and evaluation code for ICLFS, an
 inverted contrastive learning method for unsupervised feature selection.
 
-## Datasets
+## Install
+
+From the repository root, install the required packages with:
+
+```bash
+pip install -r requirements.txt
+```
+
+## Dataset Setup
 
 Place all benchmark `.mat` files in the repository `dataset/` directory. The
 loaders expect these exact filenames:
@@ -19,18 +27,7 @@ loaders expect these exact filenames:
 - `RELATHE.mat`
 - `warpPIE10P.mat`
 
-## Requirements
-
-The code expects a Python environment with:
-
-- `torch`
-- `numpy`
-- `pandas`
-- `scipy`
-- `scikit-learn`
-- `pyyaml`
-
-## Reproducing paper results
+## Reproduce Paper Results
 
 From the `src/` directory, run:
 
@@ -38,8 +35,8 @@ From the `src/` directory, run:
 python icl_eval.py
 ```
 
-This trains and evaluates ICLFS on the full paper dataset list using the
-default paper settings.
+This runs ICLFS on all 10 benchmark datasets using the default paper settings
+and reproduces the reported paper results.
 
 ## Outputs
 
@@ -48,12 +45,15 @@ Result summaries are written to `src/results/`:
 - `ICLFS_<dataset>_summary.csv`: one summary per dataset
 - `ICLFS_all_summary.csv`: combined summary over all datasets
 
-## Useful flags
+## Optional Flags
+
+If you want to change the default setup, the main useful flags are:
 
 - `--dataset <name>`: run a single dataset
 - `--seed <int>`: random seed, default `42`
 - `--epochs <int>`: training epochs, default `100`
 - `--kmeans-runs <int>`: clustering runs per subset size, default `20`
+- `--n-heads <int>`: number of attention heads, default `1`
 - `--temperature <float>`: InfoNCE temperature, default `0.05`
 - `--config-path <path>`: optional path to `config.yaml`
 - `--out <path>`: optional path for the combined summary CSV
