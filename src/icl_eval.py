@@ -55,7 +55,7 @@ LARGE_DATASET_ARCH_PRESET = {
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Standalone ICLFS evaluator using the paper-style unsupervised clustering protocol."
+        description="Standalone ICLFS evaluator using unsupervised clustering protocol."
     )
     parser.add_argument(
         "--dataset",
@@ -218,7 +218,7 @@ def train_and_rank_features(
                 _, z_neg = model(neg_view)
                 _, z_v = model(v)
                 
-                # Task 1: Sovereignty (Contrastive)
+                # Task 1: (Contrastive)
                 l_con = contrastive_loss(z_anchor, z_v, temperature=temperature, z_neg=z_neg)
                 
                 # Task 2: Decorrelation

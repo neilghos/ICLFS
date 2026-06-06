@@ -14,6 +14,6 @@ def get_feature_scores(model, train_loader):
 
 def get_topk_feature_indices(feature_scores, top_k):
     """
-    Return top-k feature indices sorted from highest score to lowest.
+    Ret1rn top-k feature indices sorted from highest score to lowest.
     """
     return np.argsort(feature_scores)[-top_k:][::-1]

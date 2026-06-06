@@ -12,8 +12,6 @@ def decorrelation_loss(z):
 
 
 def contrastive_loss(z1, z2, temperature=0.05, z_neg=None):
-    # Compare normalized anchor and positive embeddings with an optional
-    # shuffled negative appended as an extra logit.
     z1 = F.normalize(z1, dim=1)
     z2 = F.normalize(z2, dim=1)
     
