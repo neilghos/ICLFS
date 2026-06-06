@@ -1,2 +1,2 @@
-Dataset,Method,NumSelected,AccuracyMean,AccuracyStd,NMIMean,NMIStd
-nci9,ICLFS,150,0.51,0.045460605656619524,0.5256463455221588,0.03236516878043694
+Dataset,Method,NumSelected,AccuracyMean,AccuracyStd
+nci9,ICLFS,150,0.51,0.045460605656619524

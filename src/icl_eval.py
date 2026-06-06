@@ -9,7 +9,6 @@ import pandas as pd
 import torch
 from scipy.optimize import linear_sum_assignment
 from sklearn.cluster import KMeans
-from sklearn.metrics import normalized_mutual_info_score
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader
 
@@ -42,7 +41,7 @@ SHORT_DATASET_ARCH_PRESET = {
     "latent_dim": 512,
     "projector_hidden_dim": 128,
     "projector_output_dim": 16,
-    "diversity_weight": 0.20,
+    "decorrelation_weight": 0.20,
 }
 LARGE_DATASET_ARCH_DATASETS = {"basehock", "coil20", "pcmac", "relathe"}
 LARGE_DATASET_ARCH_PRESET = {
@@ -50,7 +49,7 @@ LARGE_DATASET_ARCH_PRESET = {
     "latent_dim": 1440,
     "projector_hidden_dim": 2048,
     "projector_output_dim": 32,
-    "diversity_weight": 0.40,
+    "decorrelation_weight": 0.40,
 }
 
 
@@ -72,8 +71,8 @@ def parse_args():
     parser.add_argument("--projector-hidden-dim", type=int, default=256)
     parser.add_argument("--projector-output-dim", type=int, default=128)
     parser.add_argument("--temperature", type=float, default=0.05)
-    parser.add_argument("--diversity-weight", type=float, default=0.40,
-                        help="Weight for the redundancy pruning (de-correlation) loss.")
+    parser.add_argument("--decorrelation-weight", type=float, default=0.40,
+                        help="Weight for the decorrelation loss.")
     parser.add_argument(
         "--config-path",
         default=None,
@@ -125,7 +124,7 @@ def architecture_for_dataset(
         "latent_dim": latent_dim,
         "projector_hidden_dim": projector_hidden_dim,
         "projector_output_dim": projector_output_dim,
-        "diversity_weight": None,
+        "decorrelation_weight": None,
     }
 
 
@@ -151,7 +150,6 @@ def evaluate_selected_features(
 ) -> dict[str, float]:
     x_sel = x[:, selected_idx]
     accs = []
-    nmis = []
     for run_idx in range(kmeans_runs):
         pred = KMeans(
             n_clusters=num_clusters,
@@ -159,12 +157,9 @@ def evaluate_selected_features(
             random_state=seed + run_idx,
         ).fit_predict(x_sel)
         accs.append(clustering_accuracy(y, pred))
-        nmis.append(normalized_mutual_info_score(y, pred))
     return {
         "AccuracyMean": float(np.mean(accs)),
         "AccuracyStd": float(np.std(accs)),
-        "NMIMean": float(np.mean(nmis)),
-        "NMIStd": float(np.std(nmis)),
     }
 
 
@@ -187,7 +182,7 @@ def train_and_rank_features(
     projector_hidden_dim: int,
     projector_output_dim: int,
     temperature: float,
-    diversity_weight: float = 0.005,
+    decorrelation_weight: float = 0.005,
     config_path: str | None = None,
 ) -> np.ndarray:
     set_seed(seed)
@@ -226,10 +221,10 @@ def train_and_rank_features(
                 # Task 1: Sovereignty (Contrastive)
                 l_con = contrastive_loss(z_anchor, z_v, temperature=temperature, z_neg=z_neg)
                 
-                # Task 2: Diversity (Redundancy Pruning)
+                # Task 2: Decorrelation
                 l_div = decorrelation_loss(z_anchor)
                 
-                total_loss = (l_con / num_pos) + (diversity_weight * l_div)
+                total_loss = (l_con / num_pos) + (decorrelation_weight * l_div)
                 total_loss.backward()
                 epoch_loss += total_loss.item()
             
@@ -261,10 +256,10 @@ def main():
             projector_hidden_dim=args.projector_hidden_dim,
             projector_output_dim=args.projector_output_dim,
         )
-        diversity_weight = (
-            args.diversity_weight
-            if arch["diversity_weight"] is None
-            else float(arch["diversity_weight"])
+        decorrelation_weight = (
+            args.decorrelation_weight
+            if arch["decorrelation_weight"] is None
+            else float(arch["decorrelation_weight"])
         )
 
         x, y = load_full_dataset(dataset_name, args.seed)
@@ -285,7 +280,7 @@ def main():
             f"latent_dim={arch['latent_dim']} "
             f"projector_hidden_dim={arch['projector_hidden_dim']} "
             f"projector_output_dim={arch['projector_output_dim']} "
-            f"diversity_weight={diversity_weight}"
+            f"decorrelation_weight={decorrelation_weight}"
         )
 
         ranking = train_and_rank_features(
@@ -298,7 +293,7 @@ def main():
             projector_hidden_dim=arch["projector_hidden_dim"],
             projector_output_dim=arch["projector_output_dim"],
             temperature=args.temperature,
-            diversity_weight=diversity_weight,
+            decorrelation_weight=decorrelation_weight,
             config_path=args.config_path,
         )
 
@@ -322,12 +317,12 @@ def main():
             )
 
         raw_df = pd.DataFrame(rows).sort_values(
-            ["AccuracyMean", "NMIMean", "NumSelected"],
-            ascending=[False, False, True],
+            ["AccuracyMean", "NumSelected"],
+            ascending=[False, True],
         )
         best = raw_df.iloc[0].to_dict()
         summary_df = pd.DataFrame([{**best, "Dataset": dataset_name}])[
-            ["Dataset", "Method", "NumSelected", "AccuracyMean", "AccuracyStd", "NMIMean", "NMIStd"]
+            ["Dataset", "Method", "NumSelected", "AccuracyMean", "AccuracyStd"]
         ]
         summary_rows.append(summary_df.iloc[0].to_dict())
 
@@ -340,7 +335,7 @@ def main():
 
     if len(summary_rows) > 1:
         combined_df = pd.DataFrame(summary_rows)[
-            ["Dataset", "Method", "NumSelected", "AccuracyMean", "AccuracyStd", "NMIMean", "NMIStd"]
+            ["Dataset", "Method", "NumSelected", "AccuracyMean", "AccuracyStd"]
         ]
         combined_path = Path(args.out or RESULTS_DIR / "ICLFS_all_summary.csv")
         combined_df.to_csv(combined_path, index=False)

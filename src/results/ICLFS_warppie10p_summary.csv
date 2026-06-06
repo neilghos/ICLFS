@@ -1,2 +1,2 @@
-Dataset,Method,NumSelected,AccuracyMean,AccuracyStd,NMIMean,NMIStd
-warppie10p,ICLFS,50,0.43,0.037619047619047614,0.4479996978544259,0.028913617583447182
+Dataset,Method,NumSelected,AccuracyMean,AccuracyStd
+warppie10p,ICLFS,50,0.43,0.037619047619047614
