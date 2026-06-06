@@ -35,7 +35,7 @@ From the `src/` directory, run:
 python icl_eval.py
 ```
 
-This runs ICLFS on all 10 benchmark datasets using the default paper settings and seed 42
+This runs ICLFS on all 10 benchmark datasets using the default paper settings and seed(42)
 and reproduces the reported paper results.
 
 ## Outputs
@@ -47,14 +47,13 @@ Result summaries are written to `src/results/`:
 
 ## Optional Flags
 
-If you want to change the default setup, the main useful flags are:
+If you want to change the default paper reported setup, the main useful flags are:
 
 - `--dataset <name>`: run a single dataset
 - `--epochs <int>`: training epochs, default `100`
-- `--kmeans-runs <int>`: clustering runs per subset size, default `20`
-- `--temperature <float>`: InfoNCE temperature, default `0.05`
-- `--config-path <path>`: optional path to `config.yaml`
-- `--out <path>`: optional path for the combined summary CSV
+- `--temperature <float>`: InfoNCE temperature
+- `--decorrelation-weight`: option to change the decorrelation weight
+- `--n-heads` : option to change the number of attetntion heads, default `1`
 
 ## Notes
 
