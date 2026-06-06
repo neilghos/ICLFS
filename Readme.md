@@ -1,4 +1,4 @@
-# ICLFE / ICLFS Code
+#ICLFS Code
 
 This directory contains the training and evaluation code for ICLFS, an
 inverted contrastive learning method for unsupervised feature selection.
