@@ -8,6 +8,9 @@ from .warppie10p_data import load_warppie10p_raw
 from .nci9_data import load_nci9_raw
 from .lung_data import load_lung_raw
 from .arcene_data import load_arcene_raw
+from .gisette_data import load_gisette_raw
+from .tox171_data import load_tox171_raw
+from .yale_data import load_yale_raw
 
 
 
@@ -23,4 +26,7 @@ __all__ = [
     "load_nci9_raw",
     "load_lung_raw",
     "load_arcene_raw",
+    "load_gisette_raw",
+    "load_tox171_raw",
+    "load_yale_raw",
 ]

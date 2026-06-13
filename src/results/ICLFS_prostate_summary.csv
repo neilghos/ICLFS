@@ -1,2 +1,2 @@
 Dataset,Method,NumSelected,AccuracyMean,AccuracyStd
-prostate,ICLFS,50,0.8333333333333334,0.0
+prostate,ICLFS-laplacian,50,0.8397058823529413,0.004676172555965403

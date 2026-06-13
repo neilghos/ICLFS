@@ -17,6 +17,17 @@ from data.api import DATASET_REGISTRY, InvertedFeatureDataset
 from extractor import get_feature_scores, get_topk_feature_indices
 from loss import contrastive_loss, decorrelation_loss
 from models import InvertedFeatureExpert
+from redundancy import (
+    LAPLACIAN_AFFINITY_SCHEME,
+    LAPLACIAN_BANDWIDTH_MODE,
+    LAPLACIAN_DISTANCE_METRIC,
+    LAPLACIAN_FIXED_BANDWIDTH,
+    LAPLACIAN_PRUNER_LAP_PERCENTILE,
+    LAPLACIAN_PRUNER_NEIGHBORS,
+    LAPLACIAN_PRUNER_POOL_MULTIPLIER,
+    LAPLACIAN_PRUNER_POOL_SIZE,
+    adaptive_laplacian_pool_prune,
+)
 from runtime_config import get_augmentor_config
 
 
@@ -24,18 +35,18 @@ RESULTS_DIR = Path(__file__).resolve().parent / "results"
 PAPER_KS = (50, 100, 150, 200, 250, 300)
 PAPER_NUM_KMEANS_RUNS = 20
 PAPER_DATASETS = [
-    "coil20",
+    "gisette"
+]
+SHORT_DATASET_ARCH_DATASETS = {
     "allaml",
     "arcene",
-    "basehock",
     "lung",
     "nci9",
-    "pcmac",
     "prostate",
-    "relathe",
+    "tox171",
     "warppie10p",
-]
-SHORT_DATASET_ARCH_DATASETS = {"allaml", "arcene", "lung", "nci9", "prostate", "warppie10p"}
+    "yale",
+}
 SHORT_DATASET_ARCH_PRESET = {
     "encoder_hidden_dim": 16,
     "latent_dim": 512,
@@ -43,7 +54,7 @@ SHORT_DATASET_ARCH_PRESET = {
     "projector_output_dim": 16,
     "decorrelation_weight": 0.20,
 }
-LARGE_DATASET_ARCH_DATASETS = {"basehock", "coil20", "pcmac", "relathe"}
+LARGE_DATASET_ARCH_DATASETS = {"basehock", "coil20", "gisette", "pcmac", "relathe","gisette"}
 LARGE_DATASET_ARCH_PRESET = {
     "encoder_hidden_dim": 64,
     "latent_dim": 1440,
@@ -73,6 +84,14 @@ def parse_args():
     parser.add_argument("--temperature", type=float, default=0.05)
     parser.add_argument("--decorrelation-weight", type=float, default=0.40,
                         help="Weight for the decorrelation loss.")
+    parser.add_argument("--redundancy-pool-size", type=int, default=LAPLACIAN_PRUNER_POOL_SIZE)
+    parser.add_argument("--redundancy-pool-multiplier", type=float, default=LAPLACIAN_PRUNER_POOL_MULTIPLIER)
+    parser.add_argument("--redundancy-lap-percentile", type=float, default=LAPLACIAN_PRUNER_LAP_PERCENTILE)
+    parser.add_argument("--redundancy-neighbors", type=int, default=LAPLACIAN_PRUNER_NEIGHBORS)
+    parser.add_argument("--laplacian-affinity-scheme", type=str, default=LAPLACIAN_AFFINITY_SCHEME)
+    parser.add_argument("--laplacian-distance-metric", type=str, default=LAPLACIAN_DISTANCE_METRIC)
+    parser.add_argument("--laplacian-bandwidth-mode", type=str, default=LAPLACIAN_BANDWIDTH_MODE)
+    parser.add_argument("--laplacian-fixed-bandwidth", type=float, default=LAPLACIAN_FIXED_BANDWIDTH)
     parser.add_argument(
         "--config-path",
         default=None,
@@ -238,6 +257,49 @@ def train_and_rank_features(
     return get_topk_feature_indices(feature_scores, max_k)
 
 
+def apply_redundancy_pruning(
+    x: np.ndarray,
+    ranking: np.ndarray,
+    *,
+    final_k: int,
+    pool_size: int = LAPLACIAN_PRUNER_POOL_SIZE,
+    n_neighbors: int = LAPLACIAN_PRUNER_NEIGHBORS,
+    lap_percentile: float = LAPLACIAN_PRUNER_LAP_PERCENTILE,
+    affinity_scheme: str = LAPLACIAN_AFFINITY_SCHEME,
+    distance_metric: str = LAPLACIAN_DISTANCE_METRIC,
+    bandwidth_mode: str = LAPLACIAN_BANDWIDTH_MODE,
+    bandwidth: float | None = None,
+) -> np.ndarray:
+    ranking = np.asarray(ranking, dtype=int)
+    _, _, repaired_pool = adaptive_laplacian_pool_prune(
+        x,
+        ranking,
+        pool_size=pool_size,
+        final_k=final_k,
+        n_neighbors=n_neighbors,
+        lap_percentile=lap_percentile,
+        affinity_scheme=affinity_scheme,
+        distance_metric=distance_metric,
+        bandwidth_mode=bandwidth_mode,
+        bandwidth=bandwidth,
+    )
+    repaired_set = set(np.asarray(repaired_pool, dtype=int).tolist())
+    tail = [idx for idx in ranking if idx not in repaired_set]
+    return np.asarray(list(repaired_pool) + tail, dtype=int)
+
+
+def effective_pool_size_for_k(
+    num_features: int,
+    *,
+    final_k: int,
+    pool_multiplier: float,
+    pool_size: int,
+) -> int:
+    if pool_multiplier is not None and pool_multiplier > 0:
+        return min(num_features, max(final_k, int(round(pool_multiplier * final_k))))
+    return min(num_features, max(final_k, pool_size))
+
+
 def main():
     args = parse_args()
     set_seed(args.seed)
@@ -296,10 +358,27 @@ def main():
             decorrelation_weight=decorrelation_weight,
             config_path=args.config_path,
         )
-
         rows = []
         for k_selected in ks:
-            selected_idx = np.asarray(ranking[:k_selected], dtype=int)
+            effective_pool_size = effective_pool_size_for_k(
+                x.shape[1],
+                final_k=k_selected,
+                pool_multiplier=args.redundancy_pool_multiplier,
+                pool_size=args.redundancy_pool_size,
+            )
+            pruned_ranking = apply_redundancy_pruning(
+                x,
+                ranking,
+                final_k=k_selected,
+                pool_size=effective_pool_size,
+                n_neighbors=args.redundancy_neighbors,
+                lap_percentile=args.redundancy_lap_percentile,
+                affinity_scheme=args.laplacian_affinity_scheme,
+                distance_metric=args.laplacian_distance_metric,
+                bandwidth_mode=args.laplacian_bandwidth_mode,
+                bandwidth=args.laplacian_fixed_bandwidth,
+            )
+            selected_idx = np.asarray(pruned_ranking[:k_selected], dtype=int)
             metrics = evaluate_selected_features(
                 x,
                 y,
@@ -310,7 +389,7 @@ def main():
             )
             rows.append(
                 {
-                    "Method": "ICLFS",
+                    "Method": "ICLFS-laplacian",
                     "NumSelected": k_selected,
                     **metrics,
                 }

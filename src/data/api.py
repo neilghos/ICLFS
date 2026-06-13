@@ -85,6 +85,7 @@ def build_dataset_bundle(
 
     train_ds = InvertedFeatureDataset(
         x,
+        strategy=augmentor_config.get("strategy", "four_view_mask"),
         augmentor_config=augmentor_config,
     )
     # The full inverted feature set is processed jointly as one batch.
