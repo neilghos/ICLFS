@@ -1,0 +1,2 @@
+Dataset,Method,NumSelected,AccuracyMean,AccuracyStd
+yale,ICLFS-laplacian,300,0.42757575757575755,0.03277633807985116

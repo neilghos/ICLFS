@@ -21,11 +21,9 @@ from redundancy import (
     LAPLACIAN_AFFINITY_SCHEME,
     LAPLACIAN_BANDWIDTH_MODE,
     LAPLACIAN_DISTANCE_METRIC,
-    LAPLACIAN_FIXED_BANDWIDTH,
     LAPLACIAN_PRUNER_LAP_PERCENTILE,
     LAPLACIAN_PRUNER_NEIGHBORS,
     LAPLACIAN_PRUNER_POOL_MULTIPLIER,
-    LAPLACIAN_PRUNER_POOL_SIZE,
     adaptive_laplacian_pool_prune,
 )
 from runtime_config import get_augmentor_config
@@ -35,7 +33,15 @@ RESULTS_DIR = Path(__file__).resolve().parent / "results"
 PAPER_KS = (50, 100, 150, 200, 250, 300)
 PAPER_NUM_KMEANS_RUNS = 20
 PAPER_DATASETS = [
-    "gisette"
+    "coil20",
+    "allaml",
+    "arcene",
+    "lung",
+    "nci9",
+    "prostate",
+    "tox171",
+    "warppie10p",
+    "basehock", "pcmac", "relathe","gisette"
 ]
 SHORT_DATASET_ARCH_DATASETS = {
     "allaml",
@@ -84,14 +90,9 @@ def parse_args():
     parser.add_argument("--temperature", type=float, default=0.05)
     parser.add_argument("--decorrelation-weight", type=float, default=0.40,
                         help="Weight for the decorrelation loss.")
-    parser.add_argument("--redundancy-pool-size", type=int, default=LAPLACIAN_PRUNER_POOL_SIZE)
     parser.add_argument("--redundancy-pool-multiplier", type=float, default=LAPLACIAN_PRUNER_POOL_MULTIPLIER)
     parser.add_argument("--redundancy-lap-percentile", type=float, default=LAPLACIAN_PRUNER_LAP_PERCENTILE)
     parser.add_argument("--redundancy-neighbors", type=int, default=LAPLACIAN_PRUNER_NEIGHBORS)
-    parser.add_argument("--laplacian-affinity-scheme", type=str, default=LAPLACIAN_AFFINITY_SCHEME)
-    parser.add_argument("--laplacian-distance-metric", type=str, default=LAPLACIAN_DISTANCE_METRIC)
-    parser.add_argument("--laplacian-bandwidth-mode", type=str, default=LAPLACIAN_BANDWIDTH_MODE)
-    parser.add_argument("--laplacian-fixed-bandwidth", type=float, default=LAPLACIAN_FIXED_BANDWIDTH)
     parser.add_argument(
         "--config-path",
         default=None,
@@ -262,7 +263,7 @@ def apply_redundancy_pruning(
     ranking: np.ndarray,
     *,
     final_k: int,
-    pool_size: int = LAPLACIAN_PRUNER_POOL_SIZE,
+    pool_size: int,
     n_neighbors: int = LAPLACIAN_PRUNER_NEIGHBORS,
     lap_percentile: float = LAPLACIAN_PRUNER_LAP_PERCENTILE,
     affinity_scheme: str = LAPLACIAN_AFFINITY_SCHEME,
@@ -293,11 +294,8 @@ def effective_pool_size_for_k(
     *,
     final_k: int,
     pool_multiplier: float,
-    pool_size: int,
 ) -> int:
-    if pool_multiplier is not None and pool_multiplier > 0:
-        return min(num_features, max(final_k, int(round(pool_multiplier * final_k))))
-    return min(num_features, max(final_k, pool_size))
+    return min(num_features, max(final_k, int(round(pool_multiplier * final_k))))
 
 
 def main():
@@ -364,7 +362,6 @@ def main():
                 x.shape[1],
                 final_k=k_selected,
                 pool_multiplier=args.redundancy_pool_multiplier,
-                pool_size=args.redundancy_pool_size,
             )
             pruned_ranking = apply_redundancy_pruning(
                 x,
@@ -373,10 +370,6 @@ def main():
                 pool_size=effective_pool_size,
                 n_neighbors=args.redundancy_neighbors,
                 lap_percentile=args.redundancy_lap_percentile,
-                affinity_scheme=args.laplacian_affinity_scheme,
-                distance_metric=args.laplacian_distance_metric,
-                bandwidth_mode=args.laplacian_bandwidth_mode,
-                bandwidth=args.laplacian_fixed_bandwidth,
             )
             selected_idx = np.asarray(pruned_ranking[:k_selected], dtype=int)
             metrics = evaluate_selected_features(
