@@ -205,6 +205,37 @@ def train_and_rank_features(
     decorrelation_weight: float = 0.005,
     config_path: str | None = None,
 ) -> np.ndarray:
+    feature_scores = train_and_score_features(
+        x,
+        epochs=epochs,
+        seed=seed,
+        encoder_hidden_dim=encoder_hidden_dim,
+        latent_dim=latent_dim,
+        n_heads=n_heads,
+        projector_hidden_dim=projector_hidden_dim,
+        projector_output_dim=projector_output_dim,
+        temperature=temperature,
+        decorrelation_weight=decorrelation_weight,
+        config_path=config_path,
+    )
+    max_k = max(valid_ks(x.shape[1]))
+    return get_topk_feature_indices(feature_scores, max_k)
+
+
+def train_and_score_features(
+    x: np.ndarray,
+    *,
+    epochs: int,
+    seed: int,
+    encoder_hidden_dim: int,
+    latent_dim: int,
+    n_heads: int,
+    projector_hidden_dim: int,
+    projector_output_dim: int,
+    temperature: float,
+    decorrelation_weight: float = 0.005,
+    config_path: str | None = None,
+) -> np.ndarray:
     set_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     loader = build_inverted_loader(x, config_path=config_path)
@@ -253,9 +284,7 @@ def train_and_rank_features(
         if epoch % 20 == 0 or epoch == epochs - 1:
             print(f"ICLFS Epoch {epoch:03d} | Loss: {epoch_loss / len(loader):.4f}")
 
-    feature_scores = get_feature_scores(model, loader)
-    max_k = max(valid_ks(x.shape[1]))
-    return get_topk_feature_indices(feature_scores, max_k)
+    return get_feature_scores(model, loader)
 
 
 def apply_redundancy_pruning(
