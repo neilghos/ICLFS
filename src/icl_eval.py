@@ -18,11 +18,7 @@ from extractor import get_feature_scores, get_topk_feature_indices
 from loss import contrastive_loss, decorrelation_loss
 from models import InvertedFeatureExpert
 from redundancy import (
-    LAPLACIAN_AFFINITY_SCHEME,
-    LAPLACIAN_BANDWIDTH_MODE,
-    LAPLACIAN_DISTANCE_METRIC,
     LAPLACIAN_PRUNER_LAP_PERCENTILE,
-    LAPLACIAN_PRUNER_NEIGHBORS,
     LAPLACIAN_PRUNER_POOL_MULTIPLIER,
     adaptive_laplacian_pool_prune,
 )
@@ -92,7 +88,6 @@ def parse_args():
                         help="Weight for the decorrelation loss.")
     parser.add_argument("--redundancy-pool-multiplier", type=float, default=LAPLACIAN_PRUNER_POOL_MULTIPLIER)
     parser.add_argument("--redundancy-lap-percentile", type=float, default=LAPLACIAN_PRUNER_LAP_PERCENTILE)
-    parser.add_argument("--redundancy-neighbors", type=int, default=LAPLACIAN_PRUNER_NEIGHBORS)
     parser.add_argument(
         "--config-path",
         default=None,
@@ -293,12 +288,7 @@ def apply_redundancy_pruning(
     *,
     final_k: int,
     pool_size: int,
-    n_neighbors: int = LAPLACIAN_PRUNER_NEIGHBORS,
     lap_percentile: float = LAPLACIAN_PRUNER_LAP_PERCENTILE,
-    affinity_scheme: str = LAPLACIAN_AFFINITY_SCHEME,
-    distance_metric: str = LAPLACIAN_DISTANCE_METRIC,
-    bandwidth_mode: str = LAPLACIAN_BANDWIDTH_MODE,
-    bandwidth: float | None = None,
 ) -> np.ndarray:
     ranking = np.asarray(ranking, dtype=int)
     _, _, repaired_pool = adaptive_laplacian_pool_prune(
@@ -306,12 +296,7 @@ def apply_redundancy_pruning(
         ranking,
         pool_size=pool_size,
         final_k=final_k,
-        n_neighbors=n_neighbors,
         lap_percentile=lap_percentile,
-        affinity_scheme=affinity_scheme,
-        distance_metric=distance_metric,
-        bandwidth_mode=bandwidth_mode,
-        bandwidth=bandwidth,
     )
     repaired_set = set(np.asarray(repaired_pool, dtype=int).tolist())
     tail = [idx for idx in ranking if idx not in repaired_set]
@@ -397,7 +382,6 @@ def main():
                 ranking,
                 final_k=k_selected,
                 pool_size=effective_pool_size,
-                n_neighbors=args.redundancy_neighbors,
                 lap_percentile=args.redundancy_lap_percentile,
             )
             selected_idx = np.asarray(pruned_ranking[:k_selected], dtype=int)
