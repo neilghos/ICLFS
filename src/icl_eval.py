@@ -86,7 +86,12 @@ def parse_args():
     parser.add_argument("--temperature", type=float, default=0.05)
     parser.add_argument("--decorrelation-weight", type=float, default=0.40,
                         help="Weight for the decorrelation loss.")
-    parser.add_argument("--redundancy-pool-multiplier", type=float, default=LAPLACIAN_PRUNER_POOL_MULTIPLIER)
+    parser.add_argument(
+        "--redundancy-pool-multiplier",
+        type=float,
+        default=LAPLACIAN_PRUNER_POOL_MULTIPLIER,
+        help="LGRC candidate-pool multiplier; must be >= 1.",
+    )
     parser.add_argument("--redundancy-lap-percentile", type=float, default=LAPLACIAN_PRUNER_LAP_PERCENTILE)
     parser.add_argument(
         "--config-path",
@@ -213,8 +218,8 @@ def train_and_rank_features(
         decorrelation_weight=decorrelation_weight,
         config_path=config_path,
     )
-    max_k = max(valid_ks(x.shape[1]))
-    return get_topk_feature_indices(feature_scores, max_k)
+
+    return get_topk_feature_indices(feature_scores, feature_scores.shape[0])
 
 
 def train_and_score_features(
@@ -309,11 +314,13 @@ def effective_pool_size_for_k(
     final_k: int,
     pool_multiplier: float,
 ) -> int:
-    return min(num_features, max(final_k, int(round(pool_multiplier * final_k))))
+    return min(num_features, int(round(pool_multiplier * final_k)))
 
 
 def main():
     args = parse_args()
+    if args.redundancy_pool_multiplier < 1.0:
+        raise ValueError("--redundancy-pool-multiplier must be >= 1.")
     set_seed(args.seed)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     datasets = [args.dataset] if args.dataset else list(PAPER_DATASETS)

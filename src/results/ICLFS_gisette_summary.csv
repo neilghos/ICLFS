@@ -1,2 +1,2 @@
 Dataset,Method,NumSelected,AccuracyMean,AccuracyStd
-gisette,ICLFS-laplacian,250,0.7680928571428571,0.0010373386277254773
+gisette,ICLFS-laplacian,250,0.7642428571428571,0.0004264231873313695
