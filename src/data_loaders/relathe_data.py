@@ -20,3 +20,4 @@ def load_relathe_raw(**_) -> tuple[np.ndarray, np.ndarray]:
 
 
 register_dataset("relathe", load_relathe_raw)
+# kbs

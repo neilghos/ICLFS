@@ -25,3 +25,4 @@ register_dataset("coil20", load_coil20_raw)
 def get_coil20_loaders(**kwargs):
     bundle = get_dataset_bundle("coil20", **kwargs)
     return bundle.train_loader, bundle.labels
+# kbs

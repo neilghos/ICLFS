@@ -14,3 +14,4 @@ def load_prostate_raw(**_) -> tuple[np.ndarray, np.ndarray]:
     return x, y
 
 register_dataset("prostate", load_prostate_raw)
+# kbs
