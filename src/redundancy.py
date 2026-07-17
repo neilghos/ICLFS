@@ -111,3 +111,4 @@ def adaptive_laplacian_pool_prune(
     selected_idx = pool_sorted_by_norm[:final_k]
     selected_scores = global_scores[selected_idx]
     return selected_idx.astype(int), selected_scores.astype(np.float64), pool_sorted_by_norm.astype(int)
+# kbs

@@ -40,3 +40,4 @@ def get_augmentor_config(config_path: str | Path | None = None) -> dict[str, Any
         return {"four_view_mask": four_view_mask}
 
     return {}
+# kbs

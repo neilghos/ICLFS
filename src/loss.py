@@ -24,3 +24,4 @@ def contrastive_loss(z1, z2, temperature=0.05, z_neg=None):
         
     targets = torch.arange(z1.shape[0], device=z1.device)
     return F.cross_entropy(logits, targets)
+# kbs

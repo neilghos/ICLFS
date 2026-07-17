@@ -64,3 +64,4 @@ class InvertedFeatureExpert(nn.Module):
         if return_attn:
             return h, z, attn_weights
         return h, z
+# kbs
