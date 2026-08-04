@@ -1,8 +1,7 @@
 # import lib
 import torch
 import numpy as np
-from tensorflow.keras.datasets import mnist
-from tensorflow.keras.utils import to_categorical
+from pathlib import Path
 import scipy.io
 from sklearn.utils import shuffle
 import urllib.request as urllib2
@@ -10,6 +9,17 @@ import sys
 import math
 from sklearn.preprocessing import StandardScaler
 from sklearn.datasets import make_classification
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DATASET_ROOT = REPO_ROOT / "dataset"
+
+
+def to_categorical(y, num_class):
+    y = np.asarray(y).reshape(-1).astype(int)
+    out = np.zeros((y.shape[0], num_class), dtype=np.float32)
+    out[np.arange(y.shape[0]), y] = 1.0
+    return out
 
 # class help to make dataloader
 class Dataset(torch.utils.data.Dataset):
@@ -31,6 +41,8 @@ class Dataset(torch.utils.data.Dataset):
 
 # function for loading data
 def load_mnist():
+    from tensorflow.keras.datasets import mnist
+
     (x_train, y_train), (x_test, y_test) = mnist.load_data()
 
     # shuffle the data
@@ -166,27 +178,27 @@ def get_dataset(args):
     if dataset_name == 'mnist':
         return load_mnist()
     elif dataset_name == 'usps':
-        return load_mat('./datasets/USPS.mat', 9298, 10) 
+        return load_mat(DATASET_ROOT / 'USPS.mat', 9298, 10)
     
     # face image data
     elif dataset_name == 'coil20':
-        return load_mat('./datasets/COIL20.mat', 1440, 20)
+        return load_mat(DATASET_ROOT / 'COIL20.mat', 1440, 20)
 
     # text dataset
     elif dataset_name == 'basehock':
-        return load_mat('./datasets/BASEHOCK.mat', 1993, 2)
+        return load_mat(DATASET_ROOT / 'BASEHOCK.mat', 1993, 2)
     elif dataset_name == 'pcmac':
-        return load_mat('./datasets/PCMAC.mat', 1943, 2)
+        return load_mat(DATASET_ROOT / 'PCMAC.mat', 1943, 2)
 
     # biological data
     elif dataset_name == 'prostate_ge':
-        return load_mat('./datasets/Prostate_GE.mat', 102, 2)
+        return load_mat(DATASET_ROOT / 'Prostate_GE.mat', 102, 2)
     elif dataset_name == 'tox':
-        return load_mat('./datasets/TOX_171.mat', 171, 4)
+        return load_mat(DATASET_ROOT / 'TOX_171.mat', 171, 4)
     
     # speech dataset
     elif dataset_name == 'isolet':
-        return load_mat('./datasets/Isolet.mat', 1560, 26)
+        return load_mat(DATASET_ROOT / 'Isolet.mat', 1560, 26)
     
     # artificial dataset
     elif dataset_name == 'madelon':
@@ -198,4 +210,3 @@ def get_dataset(args):
     else:
         print('can not find the corresponding dataset.')
         sys.exit()
-

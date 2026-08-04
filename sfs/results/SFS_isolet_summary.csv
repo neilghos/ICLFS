@@ -1,0 +1,2 @@
+Dataset,Method,NumSelected,AccuracyMean,AccuracyStd
+isolet,ICLFS-sfs,300,0.9160256410256411,0.013097959449809354
