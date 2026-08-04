@@ -3,16 +3,21 @@
 !/Readme.md
 !/src/
 !/src/**
+!/ufs/
+!/ufs/**
+!/sfs/
+!/sfs/**
+!/sfe/
+!/sfe/**
 !/config.yaml
 !/dataset/
 !/dataset/**
 !/requirements.txt 
 
-# Python cache inside src should not be committed.
-src/__pycache__/
-src/**/__pycache__/
-src/**/*.py[cod]
-src/**/*.pyo
+# Python caches and local artifacts should not be committed.
+**/__pycache__/
+**/*.py[cod]
+**/*.pyo
 src/checkpoints
 src/data
 

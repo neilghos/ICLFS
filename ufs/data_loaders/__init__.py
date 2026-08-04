@@ -11,8 +11,6 @@ from .arcene_data import load_arcene_raw
 from .gisette_data import load_gisette_raw
 from .tox171_data import load_tox171_raw
 
-
-
 __all__ = [
     "get_coil20_loaders",
     "load_coil20_raw",
@@ -28,4 +26,3 @@ __all__ = [
     "load_gisette_raw",
     "load_tox171_raw",
 ]
-# kbs

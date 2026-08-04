@@ -8,8 +8,8 @@ import torch
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, Dataset
 
-from augmentor import build_augmentor
-from runtime_config import get_augmentor_config
+from src.augmentor import build_augmentor
+from src.runtime_config import get_augmentor_config
 
 
 DatasetLoader = Callable[..., tuple[np.ndarray, np.ndarray]]
@@ -85,7 +85,6 @@ def build_dataset_bundle(
 
     train_ds = InvertedFeatureDataset(
         x,
-        strategy=augmentor_config.get("strategy", "four_view_mask"),
         augmentor_config=augmentor_config,
     )
     # The full inverted feature set is processed jointly as one batch.
@@ -105,7 +104,7 @@ def build_dataset_bundle(
 
 def get_dataset_bundle(name: str, **kwargs) -> DatasetBundle:
     if name not in DATASET_REGISTRY:
-        import data_loaders 
+        import ufs.data_loaders
 
     if name not in DATASET_REGISTRY:
         available = ", ".join(sorted(DATASET_REGISTRY)) or "<none>"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import random
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -12,17 +13,20 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader
 
-import data_loaders  # noqa: F401
-from data.api import DATASET_REGISTRY, InvertedFeatureDataset
-from extractor import get_feature_scores, get_topk_feature_indices
-from loss import contrastive_loss, decorrelation_loss
-from models import InvertedFeatureExpert
-from redundancy import (
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import ufs.data_loaders  # noqa: F401
+from src.data.api import DATASET_REGISTRY, InvertedFeatureDataset
+from src.extractor import get_feature_scores, get_topk_feature_indices
+from src.loss import contrastive_loss, decorrelation_loss
+from src.models import InvertedFeatureExpert
+from src.runtime_config import get_augmentor_config
+from ufs.redundancy import (
     LAPLACIAN_PRUNER_LAP_PERCENTILE,
     LAPLACIAN_PRUNER_POOL_MULTIPLIER,
     adaptive_laplacian_pool_prune,
 )
-from runtime_config import get_augmentor_config
 
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
