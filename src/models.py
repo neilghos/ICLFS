@@ -24,17 +24,24 @@ class ResidualProjector(nn.Module):
         return self.l3(h_proj)
 
 
-class GLUFeatureMixer(nn.Module):
-    def __init__(self, input_dim, hidden_dim):
+class MLPFeatureMixer(nn.Module):
+    def __init__(self, input_dim, hidden_dim, dropout=0.1):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim * 2),
-            nn.GLU(dim=1),
-            nn.Linear(hidden_dim, input_dim),
-        )
+        self.norm = nn.LayerNorm(input_dim)
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.act = nn.GELU()
+        self.fc2 = nn.Linear(hidden_dim, input_dim)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        return self.net(x)
+        residual = x
+        x = self.norm(x)
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.dropout(x)
+        x = self.fc2(x)
+        x = self.dropout(x)
+        return residual + x
 
 
 class InvertedFeatureExpert(nn.Module):
@@ -42,29 +49,17 @@ class InvertedFeatureExpert(nn.Module):
         self,
         n_patients,
         latent_dim=512,
-        n_heads=5,
         encoder_hidden_dim=1024,
         projector_hidden_dim=256,
         projector_out_dim=128,
-        mixer_type="attention",
     ):
         super().__init__()
 
-        self.mixer_type = mixer_type
-        if mixer_type == "attention":
-            self.attention = nn.MultiheadAttention(
-                embed_dim=n_patients,
-                num_heads=n_heads,
-                dropout=0.1,
-            )
-        elif mixer_type == "glu":
-            mixer_hidden_dim = min(encoder_hidden_dim, 256)
-            self.feature_mixer = GLUFeatureMixer(
-                input_dim=n_patients,
-                hidden_dim=mixer_hidden_dim,
-            )
-        else:
-            raise ValueError(f"Unsupported mixer_type: {mixer_type}")
+        mixer_hidden_dim = min(encoder_hidden_dim, 256)
+        self.feature_mixer = MLPFeatureMixer(
+            input_dim=n_patients,
+            hidden_dim=mixer_hidden_dim,
+        )
 
         # Encode each feature profile into the latent space.
         self.encoder = nn.Sequential(
@@ -82,22 +77,11 @@ class InvertedFeatureExpert(nn.Module):
         )
 
     def forward(self, x, return_attn=False):
-        attn_weights = None
-        if self.mixer_type == "attention":
-            x_attn = x.unsqueeze(1)
-            attn_out, attn_weights = self.attention(
-                x_attn,
-                x_attn,
-                x_attn,
-                need_weights=return_attn,
-            )
-            x_mixed = attn_out.squeeze(1)
-        else:
-            x_mixed = self.feature_mixer(x)
+        x_mixed = self.feature_mixer(x)
 
         h = self.encoder(x_mixed)
         z = self.projector(h)
 
         if return_attn:
-            return h, z, attn_weights
+            return h, z, None
         return h, z

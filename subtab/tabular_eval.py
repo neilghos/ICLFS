@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import random
 import sys
@@ -74,7 +75,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--selection-ratio",
         type=float,
-        default=1.0,
+        default=0.9,
         help="Fraction of original processed features kept after saliency ranking when --top-k is not set.",
     )
     parser.add_argument("--encoder-hidden-dim", type=int, default=1024)
@@ -180,11 +181,9 @@ def train_unsupervised_feature_model(
             model = InvertedFeatureExpert(
                 n_patients=x_train.shape[0],
                 latent_dim=latent_dim,
-                n_heads=n_heads,
                 encoder_hidden_dim=encoder_hidden_dim,
                 projector_hidden_dim=projector_hidden_dim,
                 projector_out_dim=projector_output_dim,
-                mixer_type="glu",
             ).to(device)
             optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
 
@@ -229,10 +228,19 @@ def train_unsupervised_feature_model(
                 anchor = batch[0].to(device)
                 _, projector_embeddings = model(anchor)
                 feature_embeddings = projector_embeddings.detach().cpu().numpy()
-            return model, feature_scores, feature_embeddings
+            del batch, anchor, projector_embeddings, model, optimizer, loader
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+            return None, feature_scores, feature_embeddings
         except RuntimeError as err:
             last_error = err
             is_cuda_oom = candidate == "cuda" and "out of memory" in str(err).lower()
+            locals_to_clear = ["model", "optimizer", "loader", "batch", "views", "anchor", "pos_views", "neg_view"]
+            for name in locals_to_clear:
+                if name in locals():
+                    del locals()[name]
+            gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             if not is_cuda_oom or candidate == candidate_devices[-1]:
@@ -448,6 +456,11 @@ def main() -> None:
                 ),
             }
         )
+
+        del feature_scores, feature_embeddings, selected_idx, z_train, z_valid, z_test
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     runs_df = pd.DataFrame(run_rows)
     summary_df = runs_df.agg(

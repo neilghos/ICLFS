@@ -1,0 +1,2 @@
+Dataset,Task,Method,NumSelected,SelectionMode,ValidationScoreMean,ValidationScoreStd,TestScoreMean,TestScoreStd,ValidationMetricMean,ValidationMetricStd,TestMetricMean,TestMetricStd
+jannis,classification,ICL-SubTab-256,49,selection_ratio=0.9,0.6923448975935991,0.004082424613608181,0.6834119543798889,0.003879551451824461,0.6923448975935991,0.004082424613608181,0.6834119543798889,0.003879551451824461
