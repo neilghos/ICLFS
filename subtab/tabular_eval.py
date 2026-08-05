@@ -331,6 +331,9 @@ def fit_supervised_probe(
             "hidden_dim": probe_hidden_dim,
         }
 
+    y_scaler = StandardScaler()
+    y_train_scaled = y_scaler.fit_transform(np.asarray(y_train, dtype=np.float32).reshape(-1, 1)).reshape(-1)
+
     grid = [1e-5, 1e-4, 1e-3]
     best = None
     probe_bar = tqdm(grid, desc=f"eval[{run_label}]", leave=False)
@@ -347,12 +350,14 @@ def fit_supervised_probe(
             n_iter_no_change=10,
             random_state=seed,
         )
-        reg.fit(z_train_scaled, y_train)
-        valid_pred = reg.predict(z_valid_scaled)
+        reg.fit(z_train_scaled, y_train_scaled)
+        valid_pred_scaled = reg.predict(z_valid_scaled)
+        valid_pred = y_scaler.inverse_transform(valid_pred_scaled.reshape(-1, 1)).reshape(-1)
         valid_metrics = calculate_metrics(task, y_valid, valid_pred)
         probe_bar.set_postfix(alpha=alpha, valid=f"{valid_metrics['score']:.4f}")
         if best is None or valid_metrics["score"] > best["valid_metrics"]["score"]:
-            test_pred = reg.predict(z_test_scaled)
+            test_pred_scaled = reg.predict(z_test_scaled)
+            test_pred = y_scaler.inverse_transform(test_pred_scaled.reshape(-1, 1)).reshape(-1)
             best = {
                 "hyperparam": alpha,
                 "valid_metrics": valid_metrics,
@@ -488,14 +493,11 @@ def main() -> None:
         "TestMetricStd": float(summary_df.loc["std", "TestMetric"]),
     }
 
-    runs_path = args.out_dir / f"{bundle.dataset_name}_subtab_runs.csv"
     summary_path = args.out_dir / f"{bundle.dataset_name}_subtab_summary.csv"
-    runs_df.to_csv(runs_path, index=False)
     pd.DataFrame([summary_row]).to_csv(summary_path, index=False)
 
     print("\nSummary")
     print(pd.DataFrame([summary_row]).to_string(index=False))
-    print(f"Saved per-run results to {runs_path}")
     print(f"Saved summary to {summary_path}")
 
 

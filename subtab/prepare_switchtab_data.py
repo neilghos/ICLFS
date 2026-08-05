@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from scipy.io import arff
-from sklearn.datasets import load_svmlight_file
+from sklearn.datasets import fetch_california_housing, load_svmlight_file
 from sklearn.impute import SimpleImputer
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
@@ -65,8 +65,7 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
     "california": DatasetSpec(
         name="california",
         task="regression",
-        loader="csv",
-        path="california.csv",
+        loader="california_fetch",
     ),
     "covertype": DatasetSpec(
         name="covertype",
@@ -216,6 +215,14 @@ def _load_adult(raw_root: Path, spec: DatasetSpec) -> tuple[pd.DataFrame, pd.Ser
     full_df[spec.target_column] = full_df[spec.target_column].str.rstrip(".")
     y = full_df.pop(spec.target_column)
     return full_df, y
+
+
+def _load_california_fetch(_: Path, spec: DatasetSpec) -> tuple[pd.DataFrame, pd.Series]:
+    dataset = fetch_california_housing(as_frame=True)
+    x = dataset.data.copy()
+    y = dataset.target.copy()
+    y.name = "target"
+    return x, y
 
 
 def _load_csv(raw_root: Path, spec: DatasetSpec) -> tuple[pd.DataFrame, pd.Series]:
@@ -448,6 +455,8 @@ def load_dataset(raw_root: Path, dataset_name: str) -> tuple[pd.DataFrame, pd.Se
     spec = DATASET_REGISTRY[dataset_name]
     if spec.loader == "adult":
         x, y = _load_adult(raw_root, spec)
+    elif spec.loader == "california_fetch":
+        x, y = _load_california_fetch(raw_root, spec)
     elif spec.loader == "csv":
         x, y = _load_csv(raw_root, spec)
     elif spec.loader == "csv_no_header":
