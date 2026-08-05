@@ -1,2 +1,0 @@
-Dataset,Task,Method,NumSelected,SelectionMode,ValidationScoreMean,ValidationScoreStd,TestScoreMean,TestScoreStd,ValidationMetricMean,ValidationMetricStd,TestMetricMean,TestMetricStd
-higgs,classification,ICL-SubTab-256,26,selection_ratio=0.9,0.6917491075981642,0.006160634560559689,0.6906068332483427,0.0058762317313331555,0.6917491075981642,0.006160634560559689,0.6906068332483427,0.0058762317313331555

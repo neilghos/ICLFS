@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import gc
-import json
 import random
 import sys
 from dataclasses import dataclass
@@ -27,17 +26,27 @@ from src.loss import contrastive_loss, decorrelation_loss
 from src.models import InvertedFeatureExpert
 from src.runtime_config import get_augmentor_config
 from subtab.metrics import calculate_metrics, summarize_metrics
+from subtab.tabm_loader import load_tabm_prepared_dataset
 
 
 SUBTAB_ROOT = Path(__file__).resolve().parent
-PROCESSED_ROOT = SUBTAB_ROOT / "processed"
+TABM_DATA_ROOT = SUBTAB_ROOT / "tabm-data"
 RESULTS_DIR = SUBTAB_ROOT / "results"
+TABM_DATASET_REGISTRY: dict[str, tuple[str, str]] = {
+    "adult": ("adult", "classification"),
+    "california": ("california", "regression"),
+    "covertype": ("covtype2", "classification"),
+    "jannis": ("classif-num-large-0-jannis", "classification"),
+    "higgs": ("higgs-small", "classification"),
+    "yearpredictionmsd": ("regression-num-large-0-year", "regression"),
+    "microsoft": ("microsoft", "ranking"),
+}
 DEFAULT_TOP_K = 256
 DEFAULT_SEEDS = list(range(10))
 
 
 @dataclass
-class ProcessedSplitBundle:
+class DatasetBundle:
     dataset_name: str
     task: str
     x_train: np.ndarray
@@ -61,8 +70,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Unsupervised subtab evaluation with ICL feature training, top-k selection, and sample projection."
     )
-    parser.add_argument("--dataset", default="california", help="Dataset key under subtab/processed.")
-    parser.add_argument("--processed-root", type=Path, default=PROCESSED_ROOT)
+    parser.add_argument("--dataset", default="california", choices=sorted(TABM_DATASET_REGISTRY), help="Dataset key under subtab/tabm-data.")
+    parser.add_argument("--tabm-root", type=Path, default=TABM_DATA_ROOT)
     parser.add_argument("--out-dir", type=Path, default=RESULTS_DIR)
     parser.add_argument("--seeds", type=int, nargs="*", default=DEFAULT_SEEDS)
     parser.add_argument("--epochs", type=int, default=100)
@@ -105,35 +114,44 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def load_processed_splits(processed_root: Path, dataset_name: str) -> ProcessedSplitBundle:
-    dataset_dir = processed_root / dataset_name
-    split_path = dataset_dir / "splits.npz"
-    metadata_path = dataset_dir / "metadata.json"
-    if not split_path.exists():
-        raise FileNotFoundError(
-            f"Processed split file not found: {split_path}. Run prepare_switchtab_data.py first."
-        )
-    if not metadata_path.exists():
-        raise FileNotFoundError(
-            f"Processed metadata file not found: {metadata_path}. Run prepare_switchtab_data.py first."
-        )
+def load_dataset_bundle(tabm_root: Path, dataset_name: str, seed: int) -> DatasetBundle:
+    if dataset_name not in TABM_DATASET_REGISTRY:
+        raise KeyError(f"Unknown dataset '{dataset_name}'.")
+    tabm_name, task_name = TABM_DATASET_REGISTRY[dataset_name]
+    prepared = load_tabm_prepared_dataset(
+        tabm_root / tabm_name,
+        task=task_name,
+        seed=seed,
+        num_policy='standard',
+        cat_policy='one-hot',
+        standardize_regression_labels_flag=True,
+    )
+    metadata = {
+        'dataset': dataset_name,
+        'task': task_name,
+        'seed': seed,
+        **prepared.metadata,
+    }
+    if task_name == 'classification':
+        metadata['class_names'] = [str(x) for x in sorted(np.unique(prepared.y_train).tolist())]
+        metadata['output_dim'] = int(len(np.unique(prepared.y_train)))
+    else:
+        metadata['output_dim'] = 1
 
-    bundle = np.load(split_path)
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    return ProcessedSplitBundle(
+    return DatasetBundle(
         dataset_name=dataset_name,
-        task=metadata["task"],
-        x_train=np.asarray(bundle["x_train"], dtype=np.float32),
-        x_valid=np.asarray(bundle["x_valid"], dtype=np.float32),
-        x_test=np.asarray(bundle["x_test"], dtype=np.float32),
-        y_train=np.asarray(bundle["y_train"]),
-        y_valid=np.asarray(bundle["y_valid"]),
-        y_test=np.asarray(bundle["y_test"]),
+        task=task_name,
+        x_train=np.asarray(prepared.x_train, dtype=np.float32),
+        x_valid=np.asarray(prepared.x_valid, dtype=np.float32),
+        x_test=np.asarray(prepared.x_test, dtype=np.float32),
+        y_train=np.asarray(prepared.y_train),
+        y_valid=np.asarray(prepared.y_valid),
+        y_test=np.asarray(prepared.y_test),
         metadata=metadata,
     )
 
 
-def resolve_backbone_config(bundle: ProcessedSplitBundle, args: argparse.Namespace) -> BackboneConfig:
+def resolve_backbone_config(bundle: DatasetBundle, args: argparse.Namespace) -> BackboneConfig:
     return BackboneConfig(
         encoder_hidden_dim=args.encoder_hidden_dim,
         latent_dim=args.latent_dim,
@@ -376,7 +394,7 @@ def main() -> None:
     if not args.seeds:
         raise ValueError("Provide at least one seed.")
 
-    bundle = load_processed_splits(args.processed_root, args.dataset)
+    bundle = load_dataset_bundle(args.tabm_root, args.dataset, seed=args.seeds[0])
     backbone = resolve_backbone_config(bundle, args)
     args.out_dir.mkdir(parents=True, exist_ok=True)
 

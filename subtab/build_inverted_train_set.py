@@ -16,11 +16,22 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.augmentor import build_augmentor
 from src.runtime_config import get_augmentor_config
+from subtab.tabm_loader import load_tabm_prepared_dataset
 
 
 SUBTAB_ROOT = Path(__file__).resolve().parent
 PROCESSED_ROOT = SUBTAB_ROOT / "processed"
 INVERTED_ROOT = SUBTAB_ROOT / "inverted"
+TABM_DATA_ROOT = SUBTAB_ROOT / "tabm-data"
+TABM_DATASET_REGISTRY: dict[str, tuple[str, str]] = {
+    "adult": ("adult", "classification"),
+    "california": ("california", "regression"),
+    "covertype": ("covtype2", "classification"),
+    "jannis": ("classif-num-large-0-jannis", "classification"),
+    "higgs": ("higgs-small", "classification"),
+    "yearpredictionmsd": ("regression-num-large-0-year", "regression"),
+    "microsoft": ("microsoft", "ranking"),
+}
 
 
 class InvertedFeatureDataset(Dataset):
@@ -65,6 +76,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--processed-root", type=Path, default=PROCESSED_ROOT)
     parser.add_argument("--out-root", type=Path, default=INVERTED_ROOT)
     parser.add_argument("--config-path", type=Path, default=None)
+    parser.add_argument("--tabm-root", type=Path, default=TABM_DATA_ROOT)
+    parser.add_argument("--source", choices=("auto", "processed", "tabm"), default="auto")
+    parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
 
@@ -87,6 +101,62 @@ def load_processed_dataset(processed_root: Path, dataset_name: str) -> InvertedT
         x_train_inverted=x_train_inverted,
         y_train=y_train,
         metadata=metadata,
+    )
+
+
+def load_tabm_dataset(tabm_root: Path, dataset_name: str, seed: int) -> InvertedTrainBundle:
+    if dataset_name not in TABM_DATASET_REGISTRY:
+        raise KeyError(f"Dataset '{dataset_name}' is not mapped to a packaged TabM split.")
+    tabm_name, task_name = TABM_DATASET_REGISTRY[dataset_name]
+    prepared = load_tabm_prepared_dataset(
+        tabm_root / tabm_name,
+        task=task_name,
+        seed=seed,
+        num_policy='standard',
+        cat_policy='one-hot',
+        standardize_regression_labels_flag=(task_name == 'regression'),
+    )
+    x_train = np.asarray(prepared.x_train, dtype=np.float32)
+    metadata = {
+        'dataset': dataset_name,
+        'task': task_name,
+        'seed': seed,
+        **prepared.metadata,
+    }
+    if task_name == 'classification':
+        metadata['class_names'] = [str(x) for x in sorted(np.unique(prepared.y_train).tolist())]
+        metadata['output_dim'] = int(len(np.unique(prepared.y_train)))
+    else:
+        metadata['output_dim'] = 1
+    return InvertedTrainBundle(
+        x_train=x_train,
+        x_train_inverted=np.asarray(x_train.T, dtype=np.float32),
+        y_train=np.asarray(prepared.y_train),
+        metadata=metadata,
+    )
+
+
+def resolve_dataset_bundle(
+    dataset_name: str,
+    *,
+    source: str,
+    processed_root: Path,
+    tabm_root: Path,
+    seed: int,
+) -> InvertedTrainBundle:
+    if source == 'processed':
+        return load_processed_dataset(processed_root, dataset_name)
+    if source == 'tabm':
+        return load_tabm_dataset(tabm_root, dataset_name, seed)
+
+    split_path = processed_root / dataset_name / 'splits.npz'
+    metadata_path = processed_root / dataset_name / 'metadata.json'
+    if split_path.exists() and metadata_path.exists():
+        return load_processed_dataset(processed_root, dataset_name)
+    if dataset_name in TABM_DATASET_REGISTRY:
+        return load_tabm_dataset(tabm_root, dataset_name, seed)
+    raise FileNotFoundError(
+        f"No processed split found for '{dataset_name}', and it is not mapped to a packaged TabM dataset."
     )
 
 
@@ -127,7 +197,13 @@ def save_inverted_dataset(out_root: Path, dataset_name: str, bundle: InvertedTra
 
 def main() -> None:
     args = parse_args()
-    bundle = load_processed_dataset(args.processed_root, args.dataset)
+    bundle = resolve_dataset_bundle(
+        args.dataset,
+        source=args.source,
+        processed_root=args.processed_root,
+        tabm_root=args.tabm_root,
+        seed=args.seed,
+    )
     output_path = save_inverted_dataset(args.out_root, args.dataset, bundle)
 
     preview_loader = build_inverted_loader(bundle.x_train, config_path=args.config_path)
