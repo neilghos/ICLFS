@@ -26,3 +26,5 @@ src/data
 dataset/*.mat
 # kbs
 /subtab/subtab_datasets
+/subtab/processed
+/subtab/results

@@ -1,2 +1,0 @@
-Dataset,Method,NumSelected,AccuracyMean,AccuracyStd
-usps,ICLFS-sfs-blended,250,0.9747175901022054,0.0006588191884838922

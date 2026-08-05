@@ -126,6 +126,10 @@ COMMON_TARGET_CANDIDATES = (
 )
 
 
+def _is_categorical_series(series: pd.Series) -> bool:
+    return pd.api.types.is_object_dtype(series) or isinstance(series.dtype, pd.CategoricalDtype)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Prepare SFE datasets with SwitchTab-style preprocessing and train/val/test splits."
@@ -154,11 +158,19 @@ def _decode_if_bytes(value: Any) -> Any:
 def _clean_object_frame(df: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
     for col in result.columns:
-        if pd.api.types.is_object_dtype(result[col]) or pd.api.types.is_categorical_dtype(result[col]):
+        if _is_categorical_series(result[col]):
             result[col] = result[col].map(_decode_if_bytes)
             result[col] = result[col].astype("string").str.strip()
             result[col] = result[col].replace({"?": pd.NA, "": pd.NA, "nan": pd.NA, "None": pd.NA})
     return result
+
+
+def _prepare_categorical_frame(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    frame = df[columns].copy()
+    for col in columns:
+        frame[col] = frame[col].astype(object)
+        frame[col] = frame[col].where(~frame[col].isna(), np.nan)
+    return frame
 
 
 def _load_adult(raw_root: Path, spec: DatasetSpec) -> tuple[pd.DataFrame, pd.Series]:
@@ -470,7 +482,7 @@ def preprocess_splits(
         for col in train_df.columns
         if pd.api.types.is_object_dtype(train_df[col])
         or pd.api.types.is_string_dtype(train_df[col])
-        or pd.api.types.is_categorical_dtype(train_df[col])
+        or isinstance(train_df[col].dtype, pd.CategoricalDtype)
         or pd.api.types.is_bool_dtype(train_df[col])
     ]
     numerical_cols = [col for col in train_df.columns if col not in categorical_cols]
@@ -489,18 +501,21 @@ def preprocess_splits(
 
     if categorical_cols:
         cat_imputer = SimpleImputer(strategy="most_frequent")
+        train_cat_input = _prepare_categorical_frame(train_df, categorical_cols)
+        valid_cat_input = _prepare_categorical_frame(valid_df, categorical_cols)
+        test_cat_input = _prepare_categorical_frame(test_df, categorical_cols)
         train_cat = pd.DataFrame(
-            cat_imputer.fit_transform(train_df[categorical_cols]),
+            cat_imputer.fit_transform(train_cat_input),
             columns=categorical_cols,
             index=train_df.index,
         )
         valid_cat = pd.DataFrame(
-            cat_imputer.transform(valid_df[categorical_cols]),
+            cat_imputer.transform(valid_cat_input),
             columns=categorical_cols,
             index=valid_df.index,
         )
         test_cat = pd.DataFrame(
-            cat_imputer.transform(test_df[categorical_cols]),
+            cat_imputer.transform(test_cat_input),
             columns=categorical_cols,
             index=test_df.index,
         )

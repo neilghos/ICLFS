@@ -1,2 +1,0 @@
-Dataset,Method,NumSelected,AccuracyMean,AccuracyStd
-coil20,ICLFS-laplacian,150,0.6868055555555556,0.02688316341706537

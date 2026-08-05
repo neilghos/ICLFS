@@ -1,2 +1,0 @@
-Dataset,Method,NumSelected,AccuracyMean,AccuracyStd
-coil20,ICLFS-sfs-blended,300,0.9888888888888889,0.0038036288715636805
