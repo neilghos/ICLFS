@@ -7,8 +7,8 @@
 !/ufs/**
 !/sfs/
 !/sfs/**
-!/sfe/
-!/sfe/**
+!/subtab/
+!/subtab/**
 !/config.yaml
 !/dataset/
 !/dataset/**
@@ -18,9 +18,11 @@
 **/__pycache__/
 **/*.py[cod]
 **/*.pyo
+
 src/checkpoints
 src/data
 
 # Keep the dataset directory structure, but do not track dataset payloads.
 dataset/*.mat
 # kbs
+/subtab/subtab_datasets

@@ -1,2 +1,2 @@
 Dataset,Method,NumSelected,AccuracyMean,AccuracyStd
-pcmac,ICLFS-sfs,300,0.7778350515463918,0.02680907963700177
+pcmac,ICLFS-sfs-blended,300,0.815979381443299,0.02265990169106527
