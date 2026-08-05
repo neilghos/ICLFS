@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from scipy.io import arff
+from sklearn.datasets import load_svmlight_file
 from sklearn.impute import SimpleImputer
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
@@ -49,6 +50,7 @@ class DatasetSpec:
     predefined_split: bool = False
     split_root: str | None = None
     feature_dim: int | None = None
+    max_rows: int | None = None
 
 
 DATASET_REGISTRY: dict[str, DatasetSpec] = {
@@ -95,6 +97,21 @@ DATASET_REGISTRY: dict[str, DatasetSpec] = {
         task="classification",
         loader="arff",
         path="jannis.arff",
+    ),
+    "higgs": DatasetSpec(
+        name="higgs",
+        task="classification",
+        loader="csv_no_header_label_first",
+        path="HIGGS.csv",
+        max_rows=98_050,
+    ),
+    "epsilon": DatasetSpec(
+        name="epsilon",
+        task="classification",
+        loader="svmlight_pair",
+        predefined_split=True,
+        split_root="epsilon",
+        feature_dim=2000,
     ),
     "microsoft": DatasetSpec(
         name="microsoft",
@@ -212,11 +229,20 @@ def _load_csv(raw_root: Path, spec: DatasetSpec) -> tuple[pd.DataFrame, pd.Serie
 
 def _load_csv_no_header(raw_root: Path, spec: DatasetSpec) -> tuple[pd.DataFrame, pd.Series]:
     assert spec.path is not None
-    df = pd.read_csv(raw_root / spec.path, header=None)
+    df = pd.read_csv(raw_root / spec.path, header=None, nrows=spec.max_rows)
     feature_count = df.shape[1] - 1
     df.columns = [f"feature_{idx}" for idx in range(feature_count)] + ["target"]
     y = df.pop("target")
     return df, y
+
+
+def _load_csv_no_header_label_first(raw_root: Path, spec: DatasetSpec) -> tuple[pd.DataFrame, pd.Series]:
+    assert spec.path is not None
+    df = pd.read_csv(raw_root / spec.path, header=None, nrows=spec.max_rows)
+    y = df.iloc[:, 0].copy()
+    x = df.iloc[:, 1:].copy()
+    x.columns = [f"feature_{idx}" for idx in range(x.shape[1])]
+    return x, y
 
 
 def _load_yearpredictionmsd(raw_root: Path, spec: DatasetSpec) -> tuple[pd.DataFrame, pd.Series]:
@@ -236,6 +262,55 @@ def _load_arff(raw_root: Path, spec: DatasetSpec) -> tuple[pd.DataFrame, pd.Seri
     target_col = resolve_target_column(df, spec)
     y = df.pop(target_col)
     return df, y
+
+
+def _load_svmlight_file(path: Path, *, feature_dim: int | None) -> tuple[pd.DataFrame, pd.Series]:
+    x_sparse, y = load_svmlight_file(path, n_features=feature_dim)
+    x = pd.DataFrame.sparse.from_spmatrix(
+        x_sparse,
+        columns=[f"feature_{idx}" for idx in range(x_sparse.shape[1])],
+    )
+    return x, pd.Series(y, name="target")
+
+
+def load_predefined_svmlight_splits(
+    raw_root: Path,
+    spec: DatasetSpec,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series, dict[str, Any]]:
+    if spec.split_root is None:
+        raise ValueError(f"Dataset '{spec.name}' is missing split_root.")
+
+    split_root = raw_root / spec.split_root
+    train_path = _resolve_existing_path([
+        split_root / 'epsilon_normalized',
+        split_root / 'train.libsvm',
+        split_root / 'train.svm',
+    ])
+    test_path = _resolve_existing_path([
+        split_root / 'epsilon_normalized.t',
+        split_root / 'test.libsvm',
+        split_root / 'test.svm',
+    ])
+
+    x_train_full, y_train_full = _load_svmlight_file(train_path, feature_dim=spec.feature_dim)
+    x_test, y_test = _load_svmlight_file(test_path, feature_dim=spec.feature_dim)
+
+    x_train, x_valid, y_train, y_valid = train_test_split(
+        x_train_full,
+        y_train_full,
+        test_size=0.2,
+        random_state=42,
+        stratify=y_train_full,
+    )
+
+    metadata = {
+        'predefined_split': True,
+        'split_root': str(split_root),
+        'source_train_rows': int(x_train_full.shape[0]),
+        'source_test_rows': int(x_test.shape[0]),
+        'valid_fraction_of_source_train': 0.2,
+    }
+    return x_train, x_valid, x_test, y_train, y_valid, y_test, metadata
 
 
 def _parse_letor_line(
@@ -377,6 +452,8 @@ def load_dataset(raw_root: Path, dataset_name: str) -> tuple[pd.DataFrame, pd.Se
         x, y = _load_csv(raw_root, spec)
     elif spec.loader == "csv_no_header":
         x, y = _load_csv_no_header(raw_root, spec)
+    elif spec.loader == "csv_no_header_label_first":
+        x, y = _load_csv_no_header_label_first(raw_root, spec)
     elif spec.loader == "yearpredictionmsd":
         x, y = _load_yearpredictionmsd(raw_root, spec)
     elif spec.loader == "arff":
@@ -395,6 +472,8 @@ def load_predefined_dataset(
     spec = DATASET_REGISTRY[dataset_name]
     if spec.loader == "letor":
         x_train, x_valid, x_test, y_train, y_valid, y_test, metadata = load_predefined_letor_splits(raw_root, spec)
+    elif spec.loader == "svmlight_pair":
+        x_train, x_valid, x_test, y_train, y_valid, y_test, metadata = load_predefined_svmlight_splits(raw_root, spec)
     else:
         raise ValueError(f"Dataset '{dataset_name}' does not support predefined split loading.")
 
