@@ -38,9 +38,25 @@ TABM_DATASET_REGISTRY: dict[str, tuple[str, str]] = {
     "covertype": ("covtype2", "classification"),
     "jannis": ("classif-num-large-0-jannis", "classification"),
     "higgs": ("higgs-small", "classification"),
+    "otto": ("otto", "classification"),
+    "churn": ("churn", "classification"),
+    "house": ("house", "regression"),
+    "diamond": ("diamond", "regression"),
     "yearpredictionmsd": ("regression-num-large-0-year", "regression"),
     "microsoft": ("microsoft", "ranking"),
 }
+DEV_DATASETS = (
+    "adult",
+    "california",
+    "jannis"
+    "yearpredictionmsd",
+    "higgs",
+    "otto",
+    "churn",
+    "house",
+    "diamond"
+    
+)
 DEFAULT_TOP_K = 256
 DEFAULT_SEEDS = list(range(10))
 
@@ -70,7 +86,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Unsupervised subtab evaluation with ICL feature training, top-k selection, and sample projection."
     )
-    parser.add_argument("--dataset", default="california", choices=sorted(TABM_DATASET_REGISTRY), help="Dataset key under subtab/tabm-data.")
+    parser.add_argument(
+        "--dataset",
+        default="california",
+        choices=sorted((*TABM_DATASET_REGISTRY.keys(), "dev")),
+        help="Dataset key under subtab/tabm-data, or 'dev' for the 6-dataset development subset.",
+    )
     parser.add_argument("--tabm-root", type=Path, default=TABM_DATA_ROOT)
     parser.add_argument("--out-dir", type=Path, default=RESULTS_DIR)
     parser.add_argument("--seeds", type=int, nargs="*", default=DEFAULT_SEEDS)
@@ -124,7 +145,7 @@ def load_dataset_bundle(tabm_root: Path, dataset_name: str, seed: int) -> Datase
         seed=seed,
         num_policy='standard',
         cat_policy='one-hot',
-        standardize_regression_labels_flag=True,
+        standardize_regression_labels_flag=False,
     )
     metadata = {
         'dataset': dataset_name,
@@ -349,8 +370,14 @@ def fit_supervised_probe(
             "hidden_dim": probe_hidden_dim,
         }
 
-    y_scaler = StandardScaler()
-    y_train_scaled = y_scaler.fit_transform(np.asarray(y_train, dtype=np.float32).reshape(-1, 1)).reshape(-1)
+    y_train_reg = np.asarray(y_train, dtype=np.float32).reshape(-1)
+    y_valid_reg = np.asarray(y_valid, dtype=np.float32).reshape(-1)
+    y_test_reg = np.asarray(y_test, dtype=np.float32).reshape(-1)
+    y_mean = float(y_train_reg.mean())
+    y_std = float(y_train_reg.std())
+    if y_std == 0.0:
+        y_std = 1.0
+    y_train_std = (y_train_reg - y_mean) / y_std
 
     grid = [1e-5, 1e-4, 1e-3]
     best = None
@@ -368,18 +395,18 @@ def fit_supervised_probe(
             n_iter_no_change=10,
             random_state=seed,
         )
-        reg.fit(z_train_scaled, y_train_scaled)
-        valid_pred_scaled = reg.predict(z_valid_scaled)
-        valid_pred = y_scaler.inverse_transform(valid_pred_scaled.reshape(-1, 1)).reshape(-1)
-        valid_metrics = calculate_metrics(task, y_valid, valid_pred)
+        reg.fit(z_train_scaled, y_train_std)
+        valid_pred_std = reg.predict(z_valid_scaled)
+        valid_pred = (valid_pred_std * y_std) + y_mean
+        valid_metrics = calculate_metrics(task, y_valid_reg, valid_pred)
         probe_bar.set_postfix(alpha=alpha, valid=f"{valid_metrics['score']:.4f}")
         if best is None or valid_metrics["score"] > best["valid_metrics"]["score"]:
-            test_pred_scaled = reg.predict(z_test_scaled)
-            test_pred = y_scaler.inverse_transform(test_pred_scaled.reshape(-1, 1)).reshape(-1)
+            test_pred_std = reg.predict(z_test_scaled)
+            test_pred = (test_pred_std * y_std) + y_mean
             best = {
                 "hyperparam": alpha,
                 "valid_metrics": valid_metrics,
-                "test_metrics": calculate_metrics(task, y_test, test_pred),
+                "test_metrics": calculate_metrics(task, y_test_reg, test_pred),
             }
     assert best is not None
     return best["valid_metrics"], best["test_metrics"], {
@@ -389,14 +416,9 @@ def fit_supervised_probe(
     }
 
 
-def main() -> None:
-    args = parse_args()
-    if not args.seeds:
-        raise ValueError("Provide at least one seed.")
-
-    bundle = load_dataset_bundle(args.tabm_root, args.dataset, seed=args.seeds[0])
+def _run_single_dataset(dataset_name: str, args: argparse.Namespace) -> dict[str, Any]:
+    bundle = load_dataset_bundle(args.tabm_root, dataset_name, seed=args.seeds[0])
     backbone = resolve_backbone_config(bundle, args)
-    args.out_dir.mkdir(parents=True, exist_ok=True)
 
     print(
         f"Loaded {bundle.dataset_name}: train={bundle.x_train.shape[0]} "
@@ -451,7 +473,7 @@ def main() -> None:
             z_test,
             bundle.y_test,
             seed=seed,
-            run_label=f"seed{seed}",
+            run_label=f"{dataset_name}-seed{seed}",
             probe_hidden_dim=args.probe_hidden_dim,
             probe_max_iter=args.probe_max_iter,
         )
@@ -517,6 +539,33 @@ def main() -> None:
     print("\nSummary")
     print(pd.DataFrame([summary_row]).to_string(index=False))
     print(f"Saved summary to {summary_path}")
+    return summary_row
+
+
+def main() -> None:
+    args = parse_args()
+    if not args.seeds:
+        raise ValueError("Provide at least one seed.")
+
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    dataset_names = list(DEV_DATASETS) if args.dataset == "dev" else [args.dataset]
+
+    all_summaries: list[dict[str, Any]] = []
+    for dataset_idx, dataset_name in enumerate(dataset_names):
+        if len(dataset_names) > 1:
+            print(f"\n{'=' * 80}")
+            print(f"Dataset {dataset_idx + 1}/{len(dataset_names)} | {dataset_name}")
+            print(f"{'=' * 80}")
+        summary_row = _run_single_dataset(dataset_name, args)
+        all_summaries.append(summary_row)
+
+    if args.dataset == "dev":
+        combined_path = args.out_dir / "dev_subtab_summary.csv"
+        combined_df = pd.DataFrame(all_summaries)
+        combined_df.to_csv(combined_path, index=False)
+        print("\nDev Summary")
+        print(combined_df.to_string(index=False))
+        print(f"Saved dev summary to {combined_path}")
 
 
 if __name__ == "__main__":

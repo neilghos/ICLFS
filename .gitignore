@@ -25,6 +25,5 @@ src/data
 # Keep the dataset directory structure, but do not track dataset payloads.
 dataset/*.mat
 # kbs
-/subtab/subtab_datasets
-/subtab/processed
+/subtab/tabm-data
 /subtab/results
