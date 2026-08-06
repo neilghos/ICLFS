@@ -1,0 +1,2 @@
+Dataset,Task,Method,NumSelected,SelectionMode,ValidationScoreMean,ValidationScoreStd,TestScoreMean,TestScoreStd,ValidationMetricMean,ValidationMetricStd,TestMetricMean,TestMetricStd
+house,regression,ICL-SubTab-256,15,selection_ratio=0.9,-36225.52526322777,718.2777265769752,-37136.33223640542,599.3559759492218,36225.52526322777,718.2777265769752,37136.33223640542,599.3559759492218
