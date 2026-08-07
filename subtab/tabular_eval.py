@@ -45,17 +45,30 @@ TABM_DATASET_REGISTRY: dict[str, tuple[str, str]] = {
     "diamond": ("diamond", "regression"),
     "yearpredictionmsd": ("regression-num-large-0-year", "regression"),
     "microsoft": ("microsoft", "ranking"),
+    # Ultra-fast iteration suite (N <= 15,000)
+    "cpu_act": ("regression-num-medium-0-cpu_act", "regression"),
+    "brazilian_houses": ("regression-cat-medium-0-Brazilian_houses", "regression"),
+    "ailerons": ("regression-num-medium-0-Ailerons", "regression"),
+    "miami_housing": ("regression-num-medium-0-MiamiHousing2016", "regression"),
+    "pol": ("regression-num-medium-0-pol", "regression"),
+    "elevators": ("regression-num-medium-0-elevators", "regression"),
+    "bank_marketing": ("classif-num-medium-0-bank-marketing", "classification"),
+    "magic_telescope": ("classif-num-medium-0-MagicTelescope", "classification"),
+    "credit": ("classif-num-medium-0-credit", "classification"),
 }
 DEV_DATASETS = (
-    "adult",
-    "california",
-    "jannis",
-    "yearpredictionmsd",
-    "higgs",
-    "otto",
     "churn",
+    "california",
     "house",
-    "diamond",
+    "cpu_act",
+    "brazilian_houses",
+    "ailerons",
+    "miami_housing",
+    "pol",
+    "elevators",
+    "bank_marketing",
+    "magic_telescope",
+    "credit",
 )
 DEFAULT_TOP_K = 256
 DEFAULT_SEEDS = list(range(5))

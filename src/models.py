@@ -386,11 +386,66 @@ class FeatureWiseSubTabModel(nn.Module):
         return h_sample, z_tokens
 
 
+class PeriodicFeatureValueTokenizer(nn.Module):
+    """
+    Periodic / Piecewise Linear Frequency Tokenizer for Tabular Data.
+    Expands scalar feature values x_{i, j} with periodic sinusoids:
+        P_{i, j} = [x_{i, j}, sin(x_{i, j} * W_f + b_f), cos(x_{i, j} * W_f + b_f)]  in R^{1 + 2K}
+    Passes P_{i, j} through per-feature transformation into d_token dimensional feature vectors:
+        e_{i, j} = LeakyReLU(P_{i, j} @ W_1 + b_1) @ W_2 + FeatureID(j)
+    """
+
+    def __init__(self, num_features: int, d_token: int = 128, n_frequencies: int = 16):
+        super().__init__()
+        self.num_features = num_features
+        self.d_token = d_token
+        self.n_frequencies = n_frequencies
+
+        # Periodic frequency parameters W_f and b_f: [num_features, n_frequencies]
+        self.w_freq = nn.Parameter(torch.randn(num_features, n_frequencies) * 0.5)
+        self.b_freq = nn.Parameter(torch.zeros(num_features, n_frequencies))
+
+        # Input dimension after sinusoidal expansion: 1 (raw) + 2 * n_frequencies
+        in_dim = 1 + 2 * n_frequencies
+
+        self.w1 = nn.Parameter(torch.randn(num_features, in_dim, d_token) * 0.02)
+        self.b1 = nn.Parameter(torch.zeros(num_features, d_token))
+        self.act = nn.LeakyReLU(0.2)
+        self.w2 = nn.Parameter(torch.randn(num_features, d_token, d_token) * 0.02)
+        self.feature_id_embed = nn.Embedding(num_features, d_token)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: [B, D] - batch of scalar tabular features
+        Returns: [B, D, d_token]
+        """
+        batch_size, num_features = x.shape
+        x_unsq = x.unsqueeze(-1)  # [B, D, 1]
+
+        # Sinusoidal periodic expansion across D features: [B, D, n_frequencies]
+        freq_arg = x_unsq * self.w_freq[:num_features].unsqueeze(0) + self.b_freq[:num_features].unsqueeze(0)
+        sin_feat = torch.sin(freq_arg)  # [B, D, n_frequencies]
+        cos_feat = torch.cos(freq_arg)  # [B, D, n_frequencies]
+
+        # Concatenate raw value + sin + cos: [B, D, 1 + 2 * n_frequencies]
+        p_feat = torch.cat([x_unsq, sin_feat, cos_feat], dim=-1)
+
+        # Per-feature linear projection: [B, D, d_token]
+        h1 = self.act(torch.einsum("bdi, dit -> bdt", p_feat, self.w1[:num_features]) + self.b1[:num_features].unsqueeze(0))
+        tokens = torch.einsum("bdt, dth -> bdh", h1, self.w2[:num_features])
+
+        # Add feature ID positional embedding
+        feature_ids = torch.arange(num_features, device=x.device)
+        id_embed = self.feature_id_embed(feature_ids).unsqueeze(0)  # [1, D, d_token]
+
+        return tokens + id_embed
+
+
 class SupervisedICLModel(nn.Module):
     """
     End-to-End Supervised Inverted Contextualized Learning (SupICL).
     Features:
-        1. Learnable non-linear feature value tokenizer (preserves binary 0/1, fits continuous curves).
+        1. Periodic Fourier Frequency Feature Tokenizer (Periodic + Linear Piecewise).
         2. Cross-feature interaction attention blocks over feature tokens.
         3. Mean + Max token pooling into compact sample representation [B, 2 * d_token].
         4. Heavy residual MLP classification / regression head trained END-TO-END.
@@ -410,7 +465,7 @@ class SupervisedICLModel(nn.Module):
         self.num_outputs = num_outputs
         self.d_token = d_token
 
-        self.tokenizer = LearnableFeatureValueTokenizer(num_features, d_token=d_token)
+        self.tokenizer = PeriodicFeatureValueTokenizer(num_features, d_token=d_token, n_frequencies=16)
         self.layers = nn.ModuleList([
             CrossFeatureTransformerBlock(d_token=d_token, n_heads=n_heads, d_ff=2 * d_token, dropout=dropout)
             for _ in range(n_layers)
