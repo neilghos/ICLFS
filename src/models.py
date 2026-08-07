@@ -441,14 +441,80 @@ class PeriodicFeatureValueTokenizer(nn.Module):
         return tokens + id_embed
 
 
+class PLEPeriodicFeatureValueTokenizer(nn.Module):
+    """
+    Piecewise Linear Encoding (PLE) + Fourier Frequency Tokenizer for Tabular Data.
+    Combines:
+        1. Quantile Bin Encodings (Piecewise Linear Interpolation across N_bins).
+        2. Sinusoidal Periodic Fourier Frequency Expansions [sin(W x + b), cos(W x + b)].
+    Yields sharp tree-like step decisions + smooth non-linear wave modeling.
+    Complexity: O(1) vectorized GPU tensor slicing. Ultra-fast!
+    """
+
+    def __init__(self, num_features: int, d_token: int = 128, n_frequencies: int = 16, n_bins: int = 32):
+        super().__init__()
+        self.num_features = num_features
+        self.d_token = d_token
+        self.n_frequencies = n_frequencies
+        self.n_bins = n_bins
+
+        # Periodic frequency parameters W_f and b_f: [num_features, n_frequencies]
+        self.w_freq = nn.Parameter(torch.randn(num_features, n_frequencies) * 0.5)
+        self.b_freq = nn.Parameter(torch.zeros(num_features, n_frequencies))
+
+        # PLE linear bin transformation weights
+        self.w_ple = nn.Parameter(torch.randn(num_features, n_bins, d_token) * 0.02)
+
+        # Sinusoidal input dimension: 1 (raw) + 2 * n_frequencies
+        in_dim_sin = 1 + 2 * n_frequencies
+        self.w_sin = nn.Parameter(torch.randn(num_features, in_dim_sin, d_token) * 0.02)
+        self.b_sin = nn.Parameter(torch.zeros(num_features, d_token))
+
+        self.act = nn.LeakyReLU(0.2)
+        self.w_out = nn.Parameter(torch.randn(num_features, d_token, d_token) * 0.02)
+        self.feature_id_embed = nn.Embedding(num_features, d_token)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: [B, D] - batch of scalar tabular features
+        Returns: [B, D, d_token]
+        """
+        batch_size, num_features = x.shape
+        x_unsq = x.unsqueeze(-1)  # [B, D, 1]
+
+        # 1. Sinusoidal Fourier Expansion: [B, D, 1 + 2 * n_frequencies]
+        freq_arg = x_unsq * self.w_freq[:num_features].unsqueeze(0) + self.b_freq[:num_features].unsqueeze(0)
+        sin_feat = torch.sin(freq_arg)
+        cos_feat = torch.cos(freq_arg)
+        p_feat = torch.cat([x_unsq, sin_feat, cos_feat], dim=-1)
+
+        # Sinusoidal Projection: [B, D, d_token]
+        h_sin = self.act(torch.einsum("bdi, dit -> bdt", p_feat, self.w_sin[:num_features]) + self.b_sin[:num_features].unsqueeze(0))
+
+        # 2. Piecewise Linear Encoding (PLE) Bin Activation: [B, D, n_bins]
+        bin_edges = torch.linspace(-3.0, 3.0, self.n_bins, device=x.device).unsqueeze(0).unsqueeze(0)
+        ple_ramps = torch.clamp((x_unsq - bin_edges) * 2.0 + 0.5, 0.0, 1.0)
+        h_ple = torch.einsum("bdi, dit -> bdt", ple_ramps, self.w_ple[:num_features])
+
+        # Combined Representation: [B, D, d_token]
+        h_combined = h_sin + h_ple
+        tokens = torch.einsum("bdt, dth -> bdh", h_combined, self.w_out[:num_features])
+
+        # Feature ID positional embedding
+        feature_ids = torch.arange(num_features, device=x.device)
+        id_embed = self.feature_id_embed(feature_ids).unsqueeze(0)
+
+        return tokens + id_embed
+
+
 class SupervisedICLModel(nn.Module):
     """
-    End-to-End Supervised Inverted Contextualized Learning (SupICL).
+    End-to-End Supervised Inverted Contextualized Learning with PLE (SupICL-PLE).
     Features:
-        1. Periodic Fourier Frequency Feature Tokenizer (Periodic + Linear Piecewise).
+        1. Piecewise Linear Encoding (PLE) + Fourier Frequency Tokenizer.
         2. Cross-feature interaction attention blocks over feature tokens.
         3. Mean + Max token pooling into compact sample representation [B, 2 * d_token].
-        4. Heavy residual MLP classification / regression head trained END-TO-END.
+        4. Heavy residual MLP classification / regression head.
     """
 
     def __init__(
@@ -465,7 +531,7 @@ class SupervisedICLModel(nn.Module):
         self.num_outputs = num_outputs
         self.d_token = d_token
 
-        self.tokenizer = PeriodicFeatureValueTokenizer(num_features, d_token=d_token, n_frequencies=16)
+        self.tokenizer = PLEPeriodicFeatureValueTokenizer(num_features, d_token=d_token, n_frequencies=16, n_bins=32)
         self.layers = nn.ModuleList([
             CrossFeatureTransformerBlock(d_token=d_token, n_heads=n_heads, d_ff=2 * d_token, dropout=dropout)
             for _ in range(n_layers)
@@ -485,12 +551,27 @@ class SupervisedICLModel(nn.Module):
             nn.Linear(256, num_outputs),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Feature Reconstruction Decoder Head: per-feature decoder [B, D, d_token] -> [B, D]
+        self.recon_head = nn.Sequential(
+            nn.Linear(d_token, d_token // 2),
+            nn.ReLU(),
+            nn.Linear(d_token // 2, 1),
+        )
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor | None]:
         """
         x: [B, D] - batch of raw tabular samples
-        Returns: logits / predictions [B, num_outputs]
+        mask: optional binary mask [B, D] where 1 indicates masked feature to reconstruct
+        Returns:
+            logits: [B, num_outputs]
+            recon_x: [B, D] (reconstructed raw feature values, if training)
         """
-        tokens = self.tokenizer(x)  # [B, D, d_token]
+        if mask is not None:
+            x_input = x * (1.0 - mask)
+        else:
+            x_input = x
+
+        tokens = self.tokenizer(x_input)  # [B, D, d_token]
         for layer in self.layers:
             tokens = layer(tokens)  # [B, D, d_token]
 
@@ -499,4 +580,9 @@ class SupervisedICLModel(nn.Module):
         z_sample = torch.cat([mean_pool, max_pool], dim=1)  # [B, 2 * d_token]
 
         logits = self.head(z_sample)  # [B, num_outputs]
-        return logits
+
+        if self.training:
+            recon_x = self.recon_head(tokens).squeeze(-1)  # [B, D]
+            return logits, recon_x
+        else:
+            return logits, None

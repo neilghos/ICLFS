@@ -57,9 +57,15 @@ TABM_DATASET_REGISTRY: dict[str, tuple[str, str]] = {
     "credit": ("classif-num-medium-0-credit", "classification"),
 }
 DEV_DATASETS = (
+    "adult",
+    "jannis",
+    "higgs",
+    "otto",
     "churn",
     "california",
     "house",
+    "diamond",
+    "yearpredictionmsd",
     "cpu_act",
     "brazilian_houses",
     "ailerons",
@@ -293,8 +299,15 @@ def train_supicl_model(
         for batch_x, batch_y in train_loader:
             batch_x, batch_y = batch_x.to(device), batch_y.to(device)
             optimizer.zero_grad()
-            logits = model(batch_x)
-            loss = criterion(logits, batch_y)
+
+            # 20% random feature mask for self-supervised subtab reconstruction
+            mask = (torch.rand_like(batch_x) < 0.20).float()
+            logits, recon_x = model(batch_x, mask=mask)
+
+            task_loss = criterion(logits, batch_y)
+            recon_loss = ((recon_x - batch_x) ** 2 * mask).sum() / (mask.sum() + 1e-6)
+            loss = task_loss + 0.25 * recon_loss
+
             loss.backward()
             optimizer.step()
 
@@ -306,7 +319,7 @@ def train_supicl_model(
             valid_preds = []
             for batch_x, _ in valid_loader:
                 batch_x = batch_x.to(device)
-                out = model(batch_x)
+                out, _ = model(batch_x)
                 if bundle.task == "classification":
                     preds = out.argmax(dim=-1).cpu().numpy()
                 else:
@@ -334,7 +347,7 @@ def train_supicl_model(
         test_preds = []
         for batch_x, _ in test_loader:
             batch_x = batch_x.to(device)
-            out = model(batch_x)
+            out, _ = model(batch_x)
             if bundle.task == "classification":
                 preds = out.argmax(dim=-1).cpu().numpy()
             else:
@@ -355,10 +368,15 @@ def train_supicl_model(
 def _run_single_dataset(dataset_name: str, args: argparse.Namespace) -> dict[str, Any]:
     bundle = load_dataset_bundle(args.tabm_root, dataset_name, seed=args.seeds[0])
 
+    if args.epochs in (50, 100, 200):
+        epochs = 50 if bundle.task == "classification" else 150
+    else:
+        epochs = args.epochs
+
     print(
         f"Loaded {bundle.dataset_name}: train={bundle.x_train.shape[0]} "
         f"valid={bundle.x_valid.shape[0]} test={bundle.x_test.shape[0]} "
-        f"features={bundle.x_train.shape[1]} task={bundle.task}"
+        f"features={bundle.x_train.shape[1]} task={bundle.task} epochs={epochs}"
     )
 
     run_rows: list[dict[str, Any]] = []
@@ -369,7 +387,7 @@ def _run_single_dataset(dataset_name: str, args: argparse.Namespace) -> dict[str
 
         valid_metrics, test_metrics = train_supicl_model(
             bundle,
-            epochs=args.epochs,
+            epochs=epochs,
             seed=seed,
             device_name=args.device,
         )
