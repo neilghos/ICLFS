@@ -1,0 +1,2 @@
+Dataset,Task,Method,ValidationScoreMean,ValidationScoreStd,TestScoreMean,TestScoreStd,ValidationMetricMean,ValidationMetricStd,TestMetricMean,TestMetricStd
+adult,classification,End2End-SupICL,0.8642100414555504,0.0020984921926325843,0.860893065536515,0.002378598383702429,0.8642100414555504,0.0020984921926325843,0.860893065536515,0.002378598383702429

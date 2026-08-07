@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn as nn
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader
@@ -48,17 +49,16 @@ TABM_DATASET_REGISTRY: dict[str, tuple[str, str]] = {
 DEV_DATASETS = (
     "adult",
     "california",
-    "jannis"
+    "jannis",
     "yearpredictionmsd",
     "higgs",
     "otto",
     "churn",
     "house",
-    "diamond"
-    
+    "diamond",
 )
 DEFAULT_TOP_K = 256
-DEFAULT_SEEDS = list(range(10))
+DEFAULT_SEEDS = list(range(5))
 
 
 @dataclass
@@ -181,29 +181,47 @@ def resolve_backbone_config(bundle: DatasetBundle, args: argparse.Namespace) -> 
     )
 
 
-def build_inverted_loader(x: np.ndarray, config_path: str | None = None) -> DataLoader:
-    train_ds = InvertedFeatureDataset(
-        x,
-        augmentor_config=get_augmentor_config(config_path),
-    )
-    return DataLoader(train_ds, batch_size=len(train_ds), shuffle=False)
+from torch.utils.data import Dataset, DataLoader
+from src.models import SupervisedICLModel
 
 
-def train_unsupervised_feature_model(
-    x_train: np.ndarray,
+class SupervisedTabularDataset(Dataset):
+    """
+    Dataset for End-to-End Supervised ICL (SupICL).
+    """
+
+    def __init__(self, x: np.ndarray, y: np.ndarray, task: str = "classification"):
+        super().__init__()
+        self.x = torch.from_numpy(np.asarray(x, dtype=np.float32))
+        self.task = task
+        if task == "classification":
+            classes = np.unique(y)
+            class_map = {c: idx for idx, c in enumerate(classes)}
+            y_mapped = np.array([class_map[val] for val in y], dtype=np.int64)
+            self.y = torch.from_numpy(y_mapped)
+        else:
+            self.y = torch.from_numpy(np.asarray(y, dtype=np.float32)).unsqueeze(-1)
+
+    def __len__(self) -> int:
+        return self.x.shape[0]
+
+    def __getitem__(self, idx: int):
+        return self.x[idx], self.y[idx]
+
+
+def train_supicl_model(
+    bundle,
     *,
-    epochs: int,
-    seed: int,
-    encoder_hidden_dim: int,
-    latent_dim: int,
-    n_heads: int,
-    projector_hidden_dim: int,
-    projector_output_dim: int,
-    temperature: float,
-    decorrelation_weight: float,
-    config_path: str | None = None,
+    epochs: int = 100,
+    seed: int = 42,
+    d_token: int = 128,
+    n_heads: int = 8,
+    n_layers: int = 3,
+    lr: float = 1e-3,
+    weight_decay: float = 1e-4,
+    batch_size: int = 256,
     device_name: str = "auto",
-) -> tuple[InvertedFeatureExpert, np.ndarray, np.ndarray]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     set_seed(seed)
     if device_name == "cuda":
         candidate_devices = ["cuda"]
@@ -212,225 +230,122 @@ def train_unsupervised_feature_model(
     else:
         candidate_devices = ["cuda", "cpu"] if torch.cuda.is_available() else ["cpu"]
 
-    last_error: RuntimeError | None = None
-    for candidate in candidate_devices:
-        device = torch.device(candidate)
-        try:
-            loader = build_inverted_loader(x_train, config_path=config_path)
-            model = InvertedFeatureExpert(
-                n_patients=x_train.shape[0],
-                latent_dim=latent_dim,
-                encoder_hidden_dim=encoder_hidden_dim,
-                projector_hidden_dim=projector_hidden_dim,
-                projector_out_dim=projector_output_dim,
-            ).to(device)
-            optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    device = torch.device(candidate_devices[0])
+    num_samples, num_features = bundle.x_train.shape
 
-            model.train()
-            epoch_bar = tqdm(
-                range(epochs),
-                desc=f"train[{candidate}]",
-                leave=False,
-            )
-            for epoch in epoch_bar:
-                epoch_loss = 0.0
-                for batch in loader:
-                    views = [view.to(device) for view in batch]
-                    anchor = views[0]
-                    pos_views = views[1:5]
-                    neg_view = views[5]
+    # Target Label Standardization for Regression
+    if bundle.task == "regression":
+        y_tr_raw = np.asarray(bundle.y_train, dtype=np.float32).reshape(-1)
+        y_mean = float(y_tr_raw.mean())
+        y_std = float(y_tr_raw.std())
+        if y_std == 0.0:
+            y_std = 1.0
+        y_tr_norm = (y_tr_raw - y_mean) / y_std
+    else:
+        y_mean, y_std = 0.0, 1.0
+        y_tr_norm = bundle.y_train
 
-                    optimizer.zero_grad()
-                    num_pos = len(pos_views)
-                    for v in pos_views:
-                        _, z_anchor = model(anchor)
-                        _, z_neg = model(neg_view)
-                        _, z_v = model(v)
+    train_dataset = SupervisedTabularDataset(bundle.x_train, y_tr_norm, task=bundle.task)
+    valid_dataset = SupervisedTabularDataset(bundle.x_valid, bundle.y_valid, task=bundle.task)
+    test_dataset = SupervisedTabularDataset(bundle.x_test, bundle.y_test, task=bundle.task)
 
-                        l_con = contrastive_loss(z_anchor, z_v, temperature=temperature, z_neg=z_neg)
-                        l_div = decorrelation_loss(z_anchor)
-                        total_loss = (l_con / num_pos) + (decorrelation_weight * l_div)
-                        total_loss.backward()
-                        epoch_loss += float(total_loss.item())
-                    optimizer.step()
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-                epoch_bar.set_postfix(loss=f"{epoch_loss / len(loader):.4f}")
-                if epoch % 20 == 0 or epoch == epochs - 1:
-                    print(
-                        f"ICL Epoch {epoch:03d} | Loss: {epoch_loss / len(loader):.4f} | device={candidate}"
-                    )
+    num_outputs = len(np.unique(bundle.y_train)) if bundle.task == "classification" else 1
+    model = SupervisedICLModel(
+        num_features=num_features,
+        num_outputs=num_outputs,
+        d_token=d_token,
+        n_heads=n_heads,
+        n_layers=n_layers,
+    ).to(device)
 
-            feature_scores = get_feature_scores(model, loader)
-            with torch.no_grad():
-                model.eval()
-                batch = next(iter(loader))
-                anchor = batch[0].to(device)
-                _, projector_embeddings = model(anchor)
-                feature_embeddings = projector_embeddings.detach().cpu().numpy()
-            del batch, anchor, projector_embeddings, model, optimizer, loader
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            gc.collect()
-            return None, feature_scores, feature_embeddings
-        except RuntimeError as err:
-            last_error = err
-            is_cuda_oom = candidate == "cuda" and "out of memory" in str(err).lower()
-            locals_to_clear = ["model", "optimizer", "loader", "batch", "views", "anchor", "pos_views", "neg_view"]
-            for name in locals_to_clear:
-                if name in locals():
-                    del locals()[name]
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            if not is_cuda_oom or candidate == candidate_devices[-1]:
-                raise
-            print("CUDA OOM in unsupervised backbone training. Falling back to CPU for this run.")
+    if bundle.task == "classification":
+        criterion = nn.CrossEntropyLoss()
+    else:
+        criterion = nn.MSELoss()
 
-    assert last_error is not None
-    raise last_error
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
+    best_valid_score = -float("inf")
+    best_weights = None
+    best_valid_metrics = {}
 
-def build_sample_representations(
-    x: np.ndarray,
-    feature_embeddings: np.ndarray,
-    selected_idx: np.ndarray,
-) -> np.ndarray:
-    selected_idx = np.asarray(selected_idx, dtype=np.int64)
-    selected_x = np.asarray(x[:, selected_idx], dtype=np.float32)
-    selected_feature_embeddings = np.asarray(feature_embeddings[selected_idx], dtype=np.float32)
-    scale = np.sqrt(max(1, selected_idx.shape[0]))
-    return (selected_x @ selected_feature_embeddings) / scale
+    epoch_bar = tqdm(range(epochs), desc=f"train_supicl[{seed}]", leave=False)
+    for epoch in epoch_bar:
+        model.train()
+        for batch_x, batch_y in train_loader:
+            batch_x, batch_y = batch_x.to(device), batch_y.to(device)
+            optimizer.zero_grad()
+            logits = model(batch_x)
+            loss = criterion(logits, batch_y)
+            loss.backward()
+            optimizer.step()
 
+        scheduler.step()
 
-def resolve_selected_feature_count(
-    num_features: int,
-    *,
-    top_k: int | None,
-    selection_ratio: float,
-) -> tuple[int, str]:
-    if top_k is not None:
-        return min(top_k, num_features), f"top_k={top_k}"
-    if not 0.0 < selection_ratio <= 1.0:
-        raise ValueError(f"selection_ratio must be in (0, 1], got {selection_ratio}.")
-    selected = max(1, int(np.ceil(selection_ratio * num_features)))
-    return min(selected, num_features), f"selection_ratio={selection_ratio}"
+        # Fast Validation Evaluation
+        model.eval()
+        with torch.no_grad():
+            valid_preds = []
+            for batch_x, _ in valid_loader:
+                batch_x = batch_x.to(device)
+                out = model(batch_x)
+                if bundle.task == "classification":
+                    preds = out.argmax(dim=-1).cpu().numpy()
+                else:
+                    preds = (out.cpu().numpy().reshape(-1) * y_std) + y_mean
+                valid_preds.extend(preds)
 
+            valid_preds = np.array(valid_preds)
+            valid_metrics = calculate_metrics(bundle.task, bundle.y_valid, valid_preds)
 
-def fit_supervised_probe(
-    task: str,
-    z_train: np.ndarray,
-    y_train: np.ndarray,
-    z_valid: np.ndarray,
-    y_valid: np.ndarray,
-    z_test: np.ndarray,
-    y_test: np.ndarray,
-    *,
-    seed: int,
-    run_label: str,
-    probe_hidden_dim: int,
-    probe_max_iter: int,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    scaler = StandardScaler()
-    z_train_scaled = scaler.fit_transform(z_train)
-    z_valid_scaled = scaler.transform(z_valid)
-    z_test_scaled = scaler.transform(z_test)
+        is_better = valid_metrics["score"] > best_valid_score
 
-    if task == "classification":
-        grid = [1e-5, 1e-4, 1e-3]
-        best = None
-        probe_bar = tqdm(grid, desc=f"eval[{run_label}]", leave=False)
-        for alpha in probe_bar:
-            clf = MLPClassifier(
-                hidden_layer_sizes=(probe_hidden_dim,),
-                activation="relu",
-                solver="adam",
-                alpha=alpha,
-                batch_size=256,
-                learning_rate_init=1e-3,
-                max_iter=probe_max_iter,
-                early_stopping=True,
-                n_iter_no_change=10,
-                random_state=seed,
-            )
-            clf.fit(z_train_scaled, y_train)
-            valid_pred = clf.predict(z_valid_scaled)
-            valid_metrics = calculate_metrics(task, y_valid, valid_pred)
-            probe_bar.set_postfix(alpha=alpha, valid=f"{valid_metrics['score']:.4f}")
-            if best is None or valid_metrics["score"] > best["valid_metrics"]["score"]:
-                test_pred = clf.predict(z_test_scaled)
-                best = {
-                    "hyperparam": alpha,
-                    "valid_metrics": valid_metrics,
-                    "test_metrics": calculate_metrics(task, y_test, test_pred),
-                }
-        assert best is not None
-        return best["valid_metrics"], best["test_metrics"], {
-            "probe": "mlp",
-            "alpha": best["hyperparam"],
-            "hidden_dim": probe_hidden_dim,
-        }
+        if is_better or best_weights is None:
+            best_valid_score = valid_metrics["score"]
+            best_valid_metrics = valid_metrics
+            best_weights = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
-    y_train_reg = np.asarray(y_train, dtype=np.float32).reshape(-1)
-    y_valid_reg = np.asarray(y_valid, dtype=np.float32).reshape(-1)
-    y_test_reg = np.asarray(y_test, dtype=np.float32).reshape(-1)
-    y_mean = float(y_train_reg.mean())
-    y_std = float(y_train_reg.std())
-    if y_std == 0.0:
-        y_std = 1.0
-    y_train_std = (y_train_reg - y_mean) / y_std
+        epoch_bar.set_postfix(valid=f"{valid_metrics['score']:.4f}")
 
-    grid = [1e-5, 1e-4, 1e-3]
-    best = None
-    probe_bar = tqdm(grid, desc=f"eval[{run_label}]", leave=False)
-    for alpha in probe_bar:
-        reg = MLPRegressor(
-            hidden_layer_sizes=(probe_hidden_dim,),
-            activation="relu",
-            solver="adam",
-            alpha=alpha,
-            batch_size=256,
-            learning_rate_init=1e-3,
-            max_iter=probe_max_iter,
-            early_stopping=True,
-            n_iter_no_change=10,
-            random_state=seed,
-        )
-        reg.fit(z_train_scaled, y_train_std)
-        valid_pred_std = reg.predict(z_valid_scaled)
-        valid_pred = (valid_pred_std * y_std) + y_mean
-        valid_metrics = calculate_metrics(task, y_valid_reg, valid_pred)
-        probe_bar.set_postfix(alpha=alpha, valid=f"{valid_metrics['score']:.4f}")
-        if best is None or valid_metrics["score"] > best["valid_metrics"]["score"]:
-            test_pred_std = reg.predict(z_test_scaled)
-            test_pred = (test_pred_std * y_std) + y_mean
-            best = {
-                "hyperparam": alpha,
-                "valid_metrics": valid_metrics,
-                "test_metrics": calculate_metrics(task, y_test_reg, test_pred),
-            }
-    assert best is not None
-    return best["valid_metrics"], best["test_metrics"], {
-        "probe": "mlp",
-        "alpha": best["hyperparam"],
-        "hidden_dim": probe_hidden_dim,
-    }
+    # Single Test Evaluation using Best Weights
+    if best_weights is not None:
+        model.load_state_dict({k: v.to(device) for k, v in best_weights.items()})
+
+    model.eval()
+    with torch.no_grad():
+        test_preds = []
+        for batch_x, _ in test_loader:
+            batch_x = batch_x.to(device)
+            out = model(batch_x)
+            if bundle.task == "classification":
+                preds = out.argmax(dim=-1).cpu().numpy()
+            else:
+                preds = (out.cpu().numpy().reshape(-1) * y_std) + y_mean
+            test_preds.extend(preds)
+
+        test_preds = np.array(test_preds)
+        test_metrics = calculate_metrics(bundle.task, bundle.y_test, test_preds)
+
+    del model, best_weights
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    return best_valid_metrics, test_metrics
 
 
 def _run_single_dataset(dataset_name: str, args: argparse.Namespace) -> dict[str, Any]:
     bundle = load_dataset_bundle(args.tabm_root, dataset_name, seed=args.seeds[0])
-    backbone = resolve_backbone_config(bundle, args)
 
     print(
         f"Loaded {bundle.dataset_name}: train={bundle.x_train.shape[0]} "
         f"valid={bundle.x_valid.shape[0]} test={bundle.x_test.shape[0]} "
         f"features={bundle.x_train.shape[1]} task={bundle.task}"
-    )
-    print(
-        "Backbone config | "
-        f"encoder_hidden_dim={backbone.encoder_hidden_dim} "
-        f"latent_dim={backbone.latent_dim} "
-        f"projector_hidden_dim={backbone.projector_hidden_dim} "
-        f"projector_output_dim={backbone.projector_output_dim}"
     )
 
     run_rows: list[dict[str, Any]] = []
@@ -438,47 +353,14 @@ def _run_single_dataset(dataset_name: str, args: argparse.Namespace) -> dict[str
     for run_idx, seed in seed_bar:
         seed_bar.set_postfix(seed=seed)
         print(f"\nRun {run_idx + 1}/{len(args.seeds)} | seed={seed}")
-        _, feature_scores, feature_embeddings = train_unsupervised_feature_model(
-            bundle.x_train,
+
+        valid_metrics, test_metrics = train_supicl_model(
+            bundle,
             epochs=args.epochs,
             seed=seed,
-            encoder_hidden_dim=backbone.encoder_hidden_dim,
-            latent_dim=backbone.latent_dim,
-            n_heads=args.n_heads,
-            projector_hidden_dim=backbone.projector_hidden_dim,
-            projector_output_dim=backbone.projector_output_dim,
-            temperature=args.temperature,
-            decorrelation_weight=args.decorrelation_weight,
-            config_path=args.config_path,
             device_name=args.device,
         )
 
-        k_selected, selection_mode = resolve_selected_feature_count(
-            feature_scores.shape[0],
-            top_k=args.top_k,
-            selection_ratio=args.selection_ratio,
-        )
-        selected_idx = get_topk_feature_indices(feature_scores, k_selected)
-
-        z_train = build_sample_representations(bundle.x_train, feature_embeddings, selected_idx)
-        z_valid = build_sample_representations(bundle.x_valid, feature_embeddings, selected_idx)
-        z_test = build_sample_representations(bundle.x_test, feature_embeddings, selected_idx)
-
-        valid_metrics, test_metrics, probe_info = fit_supervised_probe(
-            bundle.task,
-            z_train,
-            bundle.y_train,
-            z_valid,
-            bundle.y_valid,
-            z_test,
-            bundle.y_test,
-            seed=seed,
-            run_label=f"{dataset_name}-seed{seed}",
-            probe_hidden_dim=args.probe_hidden_dim,
-            probe_max_iter=args.probe_max_iter,
-        )
-
-        print(f"Selected features = {k_selected} via {selection_mode} | probe={probe_info}")
         print(f"[valid] {summarize_metrics(bundle.task, valid_metrics)}")
         print(f"[test ] {summarize_metrics(bundle.task, test_metrics)}")
 
@@ -486,11 +368,9 @@ def _run_single_dataset(dataset_name: str, args: argparse.Namespace) -> dict[str
             {
                 "Dataset": bundle.dataset_name,
                 "Task": bundle.task,
-                "Method": f"ICL-SubTab-{backbone.projector_output_dim}",
+                "Method": "End2End-SupICL",
                 "Run": run_idx,
                 "Seed": seed,
-                "NumSelected": k_selected,
-                "SelectionMode": selection_mode,
                 "ValidationScore": float(valid_metrics["score"]),
                 "TestScore": float(test_metrics["score"]),
                 "ValidationMetric": float(
@@ -501,11 +381,6 @@ def _run_single_dataset(dataset_name: str, args: argparse.Namespace) -> dict[str
                 ),
             }
         )
-
-        del feature_scores, feature_embeddings, selected_idx, z_train, z_valid, z_test
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
     runs_df = pd.DataFrame(run_rows)
     summary_df = runs_df.agg(
@@ -520,9 +395,7 @@ def _run_single_dataset(dataset_name: str, args: argparse.Namespace) -> dict[str
     summary_row = {
         "Dataset": bundle.dataset_name,
         "Task": bundle.task,
-        "Method": f"ICL-SubTab-{backbone.projector_output_dim}",
-        "NumSelected": int(run_rows[0]["NumSelected"]),
-        "SelectionMode": run_rows[0]["SelectionMode"],
+        "Method": "End2End-SupICL",
         "ValidationScoreMean": float(summary_df.loc["mean", "ValidationScore"]),
         "ValidationScoreStd": float(summary_df.loc["std", "ValidationScore"]),
         "TestScoreMean": float(summary_df.loc["mean", "TestScore"]),
@@ -533,7 +406,7 @@ def _run_single_dataset(dataset_name: str, args: argparse.Namespace) -> dict[str
         "TestMetricStd": float(summary_df.loc["std", "TestMetric"]),
     }
 
-    summary_path = args.out_dir / f"{bundle.dataset_name}_subtab_summary.csv"
+    summary_path = args.out_dir / f"{bundle.dataset_name}_supicl_summary.csv"
     pd.DataFrame([summary_row]).to_csv(summary_path, index=False)
 
     print("\nSummary")

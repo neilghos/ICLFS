@@ -1,0 +1,2 @@
+Dataset,Task,Method,ValidationScoreMean,ValidationScoreStd,TestScoreMean,TestScoreStd,ValidationMetricMean,ValidationMetricStd,TestMetricMean,TestMetricStd
+jannis,classification,End2End-SupICL,0.8003473562331147,0.0017453367895939984,0.7935163744624546,0.0027654232222859235,0.8003473562331147,0.0017453367895939984,0.7935163744624546,0.0027654232222859235

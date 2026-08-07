@@ -1,3 +1,5 @@
+import math
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -85,3 +87,361 @@ class InvertedFeatureExpert(nn.Module):
         if return_attn:
             return h, z, None
         return h, z
+
+
+class FeatureChunkExpert(nn.Module):
+    """
+    Model for Class-Conditioned Supervised Chunk Learning.
+    Inputs:
+        x: Feature chunk vector [B, chunk_len] (a sub-profile of a feature over L samples).
+    Outputs:
+        h: Latent representation of the chunk [B, latent_dim]
+        z: Projected feature representation [B, projector_out_dim]
+        logits: Downstream target logits over C classes [B, num_classes]
+    """
+
+    def __init__(
+        self,
+        chunk_len: int,
+        num_classes: int = 2,
+        latent_dim: int = 512,
+        encoder_hidden_dim: int = 512,
+        projector_hidden_dim: int = 256,
+        projector_out_dim: int = 128,
+    ):
+        super().__init__()
+        self.chunk_len = chunk_len
+        self.num_classes = num_classes
+
+        self.encoder = nn.Sequential(
+            nn.Linear(chunk_len, encoder_hidden_dim),
+            nn.BatchNorm1d(encoder_hidden_dim, momentum=0.01, eps=1e-5),
+            nn.LeakyReLU(0.2),
+            nn.Dropout(0.1),
+            nn.Linear(encoder_hidden_dim, latent_dim),
+            nn.BatchNorm1d(latent_dim, momentum=0.01, eps=1e-5),
+            nn.LeakyReLU(0.2),
+        )
+
+        self.projector = ResidualProjector(
+            latent_dim,
+            hidden_dim=projector_hidden_dim,
+            out_dim=projector_out_dim,
+        )
+
+        # Classifier head mapping chunk representation -> Downstream target class logits
+        self.classifier = nn.Sequential(
+            nn.Linear(projector_out_dim, projector_hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(projector_hidden_dim, num_classes),
+        )
+
+    def forward(self, x: torch.Tensor):
+        h = self.encoder(x)
+        z = self.projector(h)
+        logits = self.classifier(z)
+        return h, z, logits
+
+
+class NonLinearFeatureValueEncoder(nn.Module):
+    """
+    TabM-style Non-Linear Feature Value Encoder.
+    Passes scalar feature value x_{i, j} through a non-linear feature activation layer
+    before modulating the chunk-learned feature embedding W_j:
+    u_{i, j} = ReLU(x_{i, j} * W_{j, 1} + b_{j, 1}) * W_{j, 2} * W_j
+    """
+
+    def __init__(self, num_features: int, out_dim: int, hidden_dim: int = 16):
+        super().__init__()
+        self.num_features = num_features
+        self.out_dim = out_dim
+        self.hidden_dim = hidden_dim
+
+        # Per-feature non-linear transformation parameters
+        self.w1 = nn.Parameter(torch.randn(num_features, hidden_dim) * 0.02)
+        self.b1 = nn.Parameter(torch.zeros(num_features, hidden_dim))
+        self.act = nn.ReLU()
+        self.w2 = nn.Parameter(torch.randn(num_features, hidden_dim, out_dim) * 0.02)
+
+    def forward(self, x: torch.Tensor, feature_embeddings: torch.Tensor) -> torch.Tensor:
+        """
+        x: [B, K] - scalar values for selected K features
+        feature_embeddings: [K, d_out] - chunk-learned feature vectors W_j
+        Returns:
+            z_sample: [B, d_out] - non-linearly encoded sample representation
+        """
+        B, K = x.shape
+        x_unsq = x.unsqueeze(-1)  # [B, K, 1]
+
+        # First non-linear expansion: [B, K, hidden_dim]
+        h1 = self.act(x_unsq * self.w1[:K].unsqueeze(0) + self.b1[:K].unsqueeze(0))
+
+        # Second linear mapping to out_dim: [B, K, out_dim]
+        u = torch.einsum("bkh, kho -> bko", h1, self.w2[:K])
+
+        # Combine with chunk-learned feature embeddings W_j: [B, K, out_dim]
+        u_combined = u * feature_embeddings.unsqueeze(0)
+
+        # Non-linear sample aggregation: [B, out_dim]
+        scale = math.sqrt(max(1, K))
+        return u_combined.sum(dim=1) / scale
+
+
+class BatchEnsembleMultiHeadProjector(nn.Module):
+    """
+    BatchEnsemble Multi-Head Sample Projector with Non-Linear Value Encoding.
+    Generates M ensemble head sample representations using rank-1 input/output scaling vectors:
+    Z^{(m)} = ( (LeakyReLU(X_sel * W_{j,1}) * R_m) @ (W_sel * S_m) ) / sqrt(K)
+    Returns concatenated ensemble representation: [N, M * d_out]
+    """
+
+    def __init__(self, num_features: int, d_out: int = 256, num_heads: int = 16):
+        super().__init__()
+        self.num_features = num_features
+        self.d_out = d_out
+        self.num_heads = num_heads
+
+        # Non-linear feature value encoding weights
+        self.val_w1 = nn.Parameter(torch.randn(num_features, 16) * 0.02 + 1.0)
+        self.val_act = nn.LeakyReLU(0.2)
+        self.val_w2 = nn.Parameter(torch.randn(num_features, 16) * 0.02 + 1.0)
+
+        # Rank-1 input scaling vectors R: [M, num_features]
+        r_init = torch.bernoulli(torch.full((num_heads, num_features), 0.5)) * 2.0 - 1.0
+        self.r_weights = nn.Parameter(r_init * 0.1 + 1.0)
+
+        # Rank-1 output scaling vectors S: [M, d_out]
+        s_init = torch.bernoulli(torch.full((num_heads, d_out), 0.5)) * 2.0 - 1.0
+        self.s_weights = nn.Parameter(s_init * 0.1 + 1.0)
+
+    def forward(self, x: torch.Tensor, feature_embeddings: torch.Tensor, selected_idx: torch.Tensor) -> torch.Tensor:
+        """
+        x: [N, D] - raw tabular samples
+        feature_embeddings: [D, d_out] - ICL feature embeddings
+        selected_idx: [K] - indices of selected features
+        Returns: [N, num_heads * d_out]
+        """
+        selected_x = x[:, selected_idx]  # [N, K]
+        selected_w = feature_embeddings[selected_idx]  # [K, d_out]
+        K = selected_idx.shape[0]
+        scale = math.sqrt(max(1, K))
+
+        # Apply non-linear feature value transformation per selected feature
+        w1_sel = self.val_w1[selected_idx]  # [K, 16]
+        w2_sel = self.val_w2[selected_idx]  # [K, 16]
+        x_unsq = selected_x.unsqueeze(-1)  # [N, K, 1]
+        h1 = self.val_act(x_unsq * w1_sel.unsqueeze(0))  # [N, K, 16]
+        x_nl = (h1 * w2_sel.unsqueeze(0)).mean(dim=-1)  # [N, K]
+
+        head_reps = []
+        for m in range(self.num_heads):
+            r_m = self.r_weights[m, selected_idx]  # [K]
+            s_m = self.s_weights[m]  # [d_out]
+
+            x_scaled = x_nl * r_m.unsqueeze(0)  # [N, K]
+            w_scaled = selected_w * s_m.unsqueeze(0)  # [K, d_out]
+
+            z_m = (x_scaled @ w_scaled) / scale  # [N, d_out]
+            head_reps.append(z_m)
+
+        return torch.cat(head_reps, dim=-1)  # [N, M * d_out]
+
+
+class LearnableFeatureValueTokenizer(nn.Module):
+    """
+    Learnable Feature Value Tokenizer for Tabular Data.
+    Maps scalar feature values x_{i, j} to d_token dimensional feature vectors:
+    e(x_{i, j}) = LeakyReLU(x_{i, j} * W_{j, 1} + b_{j, 1}) * W_{j, 2}
+    Preserves clean 0/1 binary feature identities while learning non-linear continuous curves.
+    """
+
+    def __init__(self, num_features: int, d_token: int = 16):
+        super().__init__()
+        self.num_features = num_features
+        self.d_token = d_token
+
+        self.w1 = nn.Parameter(torch.randn(num_features, d_token) * 0.02)
+        self.b1 = nn.Parameter(torch.zeros(num_features, d_token))
+        self.act = nn.LeakyReLU(0.2)
+        self.w2 = nn.Parameter(torch.randn(num_features, d_token, d_token) * 0.02)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: [B, D] - batch of scalar tabular features
+        Returns: [B, D, d_token]
+        """
+        batch_size, num_features = x.shape
+        x_unsq = x.unsqueeze(-1)  # [B, D, 1]
+
+        h1 = self.act(x_unsq * self.w1[:num_features].unsqueeze(0) + self.b1[:num_features].unsqueeze(0))
+        # Batch transformation across D features: [B, D, d_token]
+        tokens = torch.einsum("bdh, dht -> bdt", h1, self.w2[:num_features])
+        return tokens
+
+
+class TabularFeatureTokenizer(nn.Module):
+    """
+    Maps each feature scalar value x_{i, j} for sample i to a d-dimensional feature token:
+    e_{i, j} = x_{i, j} * W_j + b_j + Feature_ID_Embedding(j)
+    """
+
+    def __init__(self, num_features: int, d_token: int = 64):
+        super().__init__()
+        self.num_features = num_features
+        self.d_token = d_token
+
+        # Per-feature weight W_j and bias b_j: shape [num_features, d_token]
+        self.weight = nn.Parameter(torch.randn(num_features, d_token) * 0.02)
+        self.bias = nn.Parameter(torch.zeros(num_features, d_token))
+
+        # Feature ID embedding to distinguish different features
+        self.feature_id_embed = nn.Embedding(num_features, d_token)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: [B, D] - mini-batch of tabular samples
+        Returns: [B, D, d_token]
+        """
+        batch_size, num_features = x.shape
+        x_unsq = x.unsqueeze(-1)  # [B, D, 1]
+
+        # Element-wise scaling per feature: [B, D, d_token]
+        value_embed = x_unsq * self.weight.unsqueeze(0) + self.bias.unsqueeze(0)
+
+        feature_ids = torch.arange(num_features, device=x.device)
+        id_embed = self.feature_id_embed(feature_ids).unsqueeze(0)  # [1, D, d_token]
+
+        return value_embed + id_embed
+
+
+class CrossFeatureTransformerBlock(nn.Module):
+    def __init__(self, d_token: int = 64, n_heads: int = 4, d_ff: int = 128, dropout: float = 0.1):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(d_token)
+        self.attn = nn.MultiheadAttention(embed_dim=d_token, num_heads=n_heads, dropout=dropout, batch_first=True)
+        self.norm2 = nn.LayerNorm(d_token)
+        self.ffn = nn.Sequential(
+            nn.Linear(d_token, d_ff),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_ff, d_token),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: [B, D, d_token]
+        """
+        norm_x = self.norm1(x)
+        attn_out, _ = self.attn(norm_x, norm_x, norm_x)
+        x = x + attn_out
+        x = x + self.ffn(self.norm2(x))
+        return x
+
+
+class FeatureWiseSubTabModel(nn.Module):
+    def __init__(
+        self,
+        num_features: int,
+        d_token: int = 64,
+        n_heads: int = 4,
+        n_layers: int = 2,
+        projector_out_dim: int = 128,
+    ):
+        super().__init__()
+        self.num_features = num_features
+        self.d_token = d_token
+
+        self.tokenizer = TabularFeatureTokenizer(num_features, d_token=d_token)
+        self.layers = nn.ModuleList([
+            CrossFeatureTransformerBlock(d_token=d_token, n_heads=n_heads, d_ff=2 * d_token)
+            for _ in range(n_layers)
+        ])
+
+        # Projector for contrastive loss over feature tokens: maps [B, D, d_token] -> [B, D, projector_out_dim]
+        self.feature_projector = nn.Sequential(
+            nn.Linear(d_token, d_token),
+            nn.ReLU(),
+            nn.Linear(d_token, projector_out_dim),
+        )
+
+    def forward(self, x: torch.Tensor):
+        """
+        x: [B, D]
+        Returns:
+            h_sample: [B, D * d_token] (contextualized sample representation)
+            z_tokens: [B, D, projector_out_dim] (projected feature tokens for InfoNCE)
+        """
+        tokens = self.tokenizer(x)  # [B, D, d_token]
+        for layer in self.layers:
+            tokens = layer(tokens)  # [B, D, d_token]
+
+        z_tokens = self.feature_projector(tokens)  # [B, D, projector_out_dim]
+
+        # Mean + Max pooling over feature tokens to create a compact, expressive sample representation [B, 2 * d_token]
+        mean_pool = tokens.mean(dim=1)  # [B, d_token]
+        max_pool = tokens.max(dim=1).values  # [B, d_token]
+        h_sample = torch.cat([mean_pool, max_pool], dim=1)  # [B, 2 * d_token]
+        return h_sample, z_tokens
+
+
+class SupervisedICLModel(nn.Module):
+    """
+    End-to-End Supervised Inverted Contextualized Learning (SupICL).
+    Features:
+        1. Learnable non-linear feature value tokenizer (preserves binary 0/1, fits continuous curves).
+        2. Cross-feature interaction attention blocks over feature tokens.
+        3. Mean + Max token pooling into compact sample representation [B, 2 * d_token].
+        4. Heavy residual MLP classification / regression head trained END-TO-END.
+    """
+
+    def __init__(
+        self,
+        num_features: int,
+        num_outputs: int = 2,
+        d_token: int = 128,
+        n_heads: int = 8,
+        n_layers: int = 3,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.num_features = num_features
+        self.num_outputs = num_outputs
+        self.d_token = d_token
+
+        self.tokenizer = LearnableFeatureValueTokenizer(num_features, d_token=d_token)
+        self.layers = nn.ModuleList([
+            CrossFeatureTransformerBlock(d_token=d_token, n_heads=n_heads, d_ff=2 * d_token, dropout=dropout)
+            for _ in range(n_layers)
+        ])
+
+        sample_dim = 2 * d_token  # Mean pool + Max pool
+
+        self.head = nn.Sequential(
+            nn.Linear(sample_dim, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(256, num_outputs),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: [B, D] - batch of raw tabular samples
+        Returns: logits / predictions [B, num_outputs]
+        """
+        tokens = self.tokenizer(x)  # [B, D, d_token]
+        for layer in self.layers:
+            tokens = layer(tokens)  # [B, D, d_token]
+
+        mean_pool = tokens.mean(dim=1)  # [B, d_token]
+        max_pool = tokens.max(dim=1).values  # [B, d_token]
+        z_sample = torch.cat([mean_pool, max_pool], dim=1)  # [B, 2 * d_token]
+
+        logits = self.head(z_sample)  # [B, num_outputs]
+        return logits

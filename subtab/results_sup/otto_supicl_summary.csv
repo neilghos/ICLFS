@@ -1,0 +1,2 @@
+Dataset,Task,Method,ValidationScoreMean,ValidationScoreStd,TestScoreMean,TestScoreStd,ValidationMetricMean,ValidationMetricStd,TestMetricMean,TestMetricStd
+otto,classification,End2End-SupICL,0.8058377941622059,0.003650416366513177,0.80379767291532,0.004640781375497952,0.8058377941622059,0.003650416366513177,0.80379767291532,0.004640781375497952

@@ -1,0 +1,2 @@
+Dataset,Task,Method,ValidationScoreMean,ValidationScoreStd,TestScoreMean,TestScoreStd,ValidationMetricMean,ValidationMetricStd,TestMetricMean,TestMetricStd
+yearpredictionmsd,regression,End2End-SupICL,-9.006486132638344,0.014931836312445634,-9.087150341547915,0.026136886317316962,9.006486132638344,0.014931836312445634,9.087150341547915,0.026136886317316962

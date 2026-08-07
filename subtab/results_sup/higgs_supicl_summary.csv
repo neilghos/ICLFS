@@ -1,0 +1,2 @@
+Dataset,Task,Method,ValidationScoreMean,ValidationScoreStd,TestScoreMean,TestScoreStd,ValidationMetricMean,ValidationMetricStd,TestMetricMean,TestMetricStd
+higgs,classification,End2End-SupICL,0.7292580316165221,0.0013375399486436831,0.7245283018867925,0.002111808183666372,0.7292580316165221,0.0013375399486436831,0.7245283018867925,0.002111808183666372

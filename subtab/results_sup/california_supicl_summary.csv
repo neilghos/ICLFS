@@ -1,0 +1,2 @@
+Dataset,Task,Method,ValidationScoreMean,ValidationScoreStd,TestScoreMean,TestScoreStd,ValidationMetricMean,ValidationMetricStd,TestMetricMean,TestMetricStd
+california,regression,End2End-SupICL,-0.480040676292029,0.0019506114258955752,-0.48417273283821965,0.004392811991099599,0.480040676292029,0.0019506114258955752,0.48417273283821965,0.004392811991099599
