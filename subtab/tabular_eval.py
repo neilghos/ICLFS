@@ -264,9 +264,29 @@ def train_supicl_model(
         y_mean, y_std = 0.0, 1.0
         y_tr_norm = bundle.y_train
 
-    train_dataset = SupervisedTabularDataset(bundle.x_train, y_tr_norm, task=bundle.task)
-    valid_dataset = SupervisedTabularDataset(bundle.x_valid, bundle.y_valid, task=bundle.task)
-    test_dataset = SupervisedTabularDataset(bundle.x_test, bundle.y_test, task=bundle.task)
+    if bundle.task == "classification":
+        from sklearn.preprocessing import QuantileTransformer
+        # Fit QuantileTransformer to map empirical distribution to normal
+        qt = QuantileTransformer(output_distribution='normal', random_state=seed, n_quantiles=min(1000, num_samples))
+        x_train_qt = qt.fit_transform(bundle.x_train)
+        x_valid_qt = qt.transform(bundle.x_valid)
+        x_test_qt = qt.transform(bundle.x_test)
+        
+        # Stack quantile and standard scaling to shape [N, D, 2]
+        x_train_input = np.stack([x_train_qt, bundle.x_train], axis=-1)
+        x_valid_input = np.stack([x_valid_qt, bundle.x_valid], axis=-1)
+        x_test_input = np.stack([x_test_qt, bundle.x_test], axis=-1)
+        in_channels = 2
+    else:
+        # For regression, keep 1 channel standard scaled of shape [N, D, 1]
+        x_train_input = np.expand_dims(bundle.x_train, axis=-1)
+        x_valid_input = np.expand_dims(bundle.x_valid, axis=-1)
+        x_test_input = np.expand_dims(bundle.x_test, axis=-1)
+        in_channels = 1
+
+    train_dataset = SupervisedTabularDataset(x_train_input, y_tr_norm, task=bundle.task)
+    valid_dataset = SupervisedTabularDataset(x_valid_input, bundle.y_valid, task=bundle.task)
+    test_dataset = SupervisedTabularDataset(x_test_input, bundle.y_test, task=bundle.task)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False)
@@ -276,6 +296,7 @@ def train_supicl_model(
     model = SupervisedICLModel(
         num_features=num_features,
         num_outputs=num_outputs,
+        in_channels=in_channels,
         d_token=d_token,
         n_heads=n_heads,
         n_layers=n_layers,
@@ -300,12 +321,13 @@ def train_supicl_model(
             batch_x, batch_y = batch_x.to(device), batch_y.to(device)
             optimizer.zero_grad()
 
-            # 20% random feature mask for self-supervised subtab reconstruction
-            mask = (torch.rand_like(batch_x) < 0.20).float()
+            # 20% random feature mask for self-supervised subtab reconstruction (shape [B, D])
+            mask = (torch.rand(batch_x.shape[0], batch_x.shape[1], device=device) < 0.20).float()
             logits, recon_x = model(batch_x, mask=mask)
 
             task_loss = criterion(logits, batch_y)
-            recon_loss = ((recon_x - batch_x) ** 2 * mask).sum() / (mask.sum() + 1e-6)
+            # Compare reconstruction with standard-scaled features (the last channel)
+            recon_loss = ((recon_x - batch_x[:, :, -1]) ** 2 * mask).sum() / (mask.sum() + 1e-6)
             loss = task_loss + 0.25 * recon_loss
 
             loss.backward()
