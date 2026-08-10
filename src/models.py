@@ -451,24 +451,25 @@ class PLEPeriodicFeatureValueTokenizer(nn.Module):
     Complexity: O(1) vectorized GPU tensor slicing. Ultra-fast!
     """
 
-    def __init__(self, num_features: int, d_token: int = 128, n_frequencies: int = 16, n_bins: int = 32):
+    def __init__(self, num_features: int, in_channels: int = 1, d_token: int = 128, n_frequencies: int = 16, n_bins: int = 32):
         super().__init__()
         self.num_features = num_features
+        self.in_channels = in_channels
         self.d_token = d_token
         self.n_frequencies = n_frequencies
         self.n_bins = n_bins
 
-        # Periodic frequency parameters W_f and b_f: [num_features, n_frequencies]
-        self.w_freq = nn.Parameter(torch.randn(num_features, n_frequencies) * 0.5)
+        # Periodic frequency parameters W_f and b_f: [num_features, in_channels, n_frequencies]
+        self.w_freq = nn.Parameter(torch.randn(num_features, in_channels, n_frequencies) * 0.5)
         self.b_freq = nn.Parameter(torch.zeros(num_features, n_frequencies))
 
         # PLE linear bin transformation weights
         self.w_ple = nn.Parameter(torch.randn(num_features, n_bins, d_token) * 0.02)
 
-        # Sinusoidal input dimension: 1 (raw) + 2 * n_frequencies
-        in_dim_sin = 1 + 2 * n_frequencies
-        self.w_sin = nn.Parameter(torch.randn(num_features, in_dim_sin, d_token) * 0.02)
-        self.b_sin = nn.Parameter(torch.zeros(num_features, d_token))
+        # Periodic input dimension: in_channels (raw) + 2 * n_frequencies
+        in_dim_periodic = in_channels + 2 * n_frequencies
+        self.w_periodic = nn.Parameter(torch.randn(num_features, in_dim_periodic, d_token) * 0.02)
+        self.b_periodic = nn.Parameter(torch.zeros(num_features, d_token))
 
         self.act = nn.LeakyReLU(0.2)
         self.w_out = nn.Parameter(torch.randn(num_features, d_token, d_token) * 0.02)
@@ -476,28 +477,29 @@ class PLEPeriodicFeatureValueTokenizer(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        x: [B, D] - batch of scalar tabular features
+        x: [B, D, in_channels] - batch of tabular features with in_channels
         Returns: [B, D, d_token]
         """
-        batch_size, num_features = x.shape
-        x_unsq = x.unsqueeze(-1)  # [B, D, 1]
+        batch_size, num_features, in_channels = x.shape
 
-        # 1. Sinusoidal Fourier Expansion: [B, D, 1 + 2 * n_frequencies]
-        freq_arg = x_unsq * self.w_freq[:num_features].unsqueeze(0) + self.b_freq[:num_features].unsqueeze(0)
+        # 1. Periodic Fourier Expansion: [B, D, in_channels + 2 * n_frequencies]
+        freq_arg = torch.einsum("bdc, dcf -> bdf", x, self.w_freq[:num_features]) + self.b_freq[:num_features].unsqueeze(0)
         sin_feat = torch.sin(freq_arg)
         cos_feat = torch.cos(freq_arg)
-        p_feat = torch.cat([x_unsq, sin_feat, cos_feat], dim=-1)
+        p_feat = torch.cat([x, sin_feat, cos_feat], dim=-1)
 
-        # Sinusoidal Projection: [B, D, d_token]
-        h_sin = self.act(torch.einsum("bdi, dit -> bdt", p_feat, self.w_sin[:num_features]) + self.b_sin[:num_features].unsqueeze(0))
+        # Periodic Projection: [B, D, d_token]
+        h_periodic = self.act(torch.einsum("bdi, dit -> bdt", p_feat, self.w_periodic[:num_features]) + self.b_periodic[:num_features].unsqueeze(0))
 
         # 2. Piecewise Linear Encoding (PLE) Bin Activation: [B, D, n_bins]
+        # Run PLE on the standard-scaled channel (the last channel)
+        ple_x = x[:, :, -1]
         bin_edges = torch.linspace(-3.0, 3.0, self.n_bins, device=x.device).unsqueeze(0).unsqueeze(0)
-        ple_ramps = torch.clamp((x_unsq - bin_edges) * 2.0 + 0.5, 0.0, 1.0)
+        ple_ramps = torch.clamp((ple_x.unsqueeze(-1) - bin_edges) * 2.0 + 0.5, 0.0, 1.0)
         h_ple = torch.einsum("bdi, dit -> bdt", ple_ramps, self.w_ple[:num_features])
 
         # Combined Representation: [B, D, d_token]
-        h_combined = h_sin + h_ple
+        h_combined = h_periodic + h_ple
         tokens = torch.einsum("bdt, dth -> bdh", h_combined, self.w_out[:num_features])
 
         # Feature ID positional embedding
@@ -521,6 +523,7 @@ class SupervisedICLModel(nn.Module):
         self,
         num_features: int,
         num_outputs: int = 2,
+        in_channels: int = 1,
         d_token: int = 128,
         n_heads: int = 8,
         n_layers: int = 3,
@@ -531,7 +534,7 @@ class SupervisedICLModel(nn.Module):
         self.num_outputs = num_outputs
         self.d_token = d_token
 
-        self.tokenizer = PLEPeriodicFeatureValueTokenizer(num_features, d_token=d_token, n_frequencies=16, n_bins=32)
+        self.tokenizer = PLEPeriodicFeatureValueTokenizer(num_features, in_channels=in_channels, d_token=d_token, n_frequencies=16, n_bins=32)
         self.layers = nn.ModuleList([
             CrossFeatureTransformerBlock(d_token=d_token, n_heads=n_heads, d_ff=2 * d_token, dropout=dropout)
             for _ in range(n_layers)
@@ -567,7 +570,7 @@ class SupervisedICLModel(nn.Module):
             recon_x: [B, D] (reconstructed raw feature values, if training)
         """
         if mask is not None:
-            x_input = x * (1.0 - mask)
+            x_input = x * (1.0 - mask.unsqueeze(-1))
         else:
             x_input = x
 
