@@ -1,2 +1,0 @@
-Dataset,Task,Method,ValidationScoreMean,ValidationScoreStd,TestScoreMean,TestScoreStd,ValidationMetricMean,ValidationMetricStd,TestMetricMean,TestMetricStd
-house,regression,End2End-SupICL,-29997.3033831659,393.84917529342965,-32479.37737678875,242.61187147153564,29997.3033831659,393.84917529342965,32479.37737678875,242.61187147153564

@@ -1,2 +1,0 @@
-Dataset,Task,Method,ValidationScoreMean,ValidationScoreStd,TestScoreMean,TestScoreStd,ValidationMetricMean,ValidationMetricStd,TestMetricMean,TestMetricStd
-churn,classification,End2End-SupICL,0.8699999999999999,0.0011692679333668318,0.8583000000000001,0.002196588263648867,0.8699999999999999,0.0011692679333668318,0.8583000000000001,0.002196588263648867

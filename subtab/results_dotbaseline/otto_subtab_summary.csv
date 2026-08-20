@@ -1,2 +1,0 @@
-Dataset,Task,Method,NumSelected,SelectionMode,ValidationScoreMean,ValidationScoreStd,TestScoreMean,TestScoreStd,ValidationMetricMean,ValidationMetricStd,TestMetricMean,TestMetricStd
-otto,classification,ICL-SubTab-256,84,selection_ratio=0.9,0.7949702050297949,0.0020600018234896594,0.7948852617970266,0.0019408264275268428,0.7949702050297949,0.0020600018234896594,0.7948852617970266,0.0019408264275268428

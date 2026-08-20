@@ -1,2 +1,0 @@
-Dataset,Task,Method,NumSelected,SelectionMode,ValidationScoreMean,ValidationScoreStd,TestScoreMean,TestScoreStd,ValidationMetricMean,ValidationMetricStd,TestMetricMean,TestMetricStd
-california,regression,ICL-SubTab-256,8,selection_ratio=0.9,-0.5592322882928623,0.012253727892657244,-0.5744421265123008,0.021180420123965284,0.5592322882928623,0.012253727892657244,0.5744421265123008,0.021180420123965284

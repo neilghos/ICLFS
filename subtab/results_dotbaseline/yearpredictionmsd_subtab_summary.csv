@@ -1,2 +1,0 @@
-Dataset,Task,Method,NumSelected,SelectionMode,ValidationScoreMean,ValidationScoreStd,TestScoreMean,TestScoreStd,ValidationMetricMean,ValidationMetricStd,TestMetricMean,TestMetricStd
-yearpredictionmsd,regression,ICL-SubTab-256,81,selection_ratio=0.9,-9.219653813723673,0.03558769462913381,-9.302288657610072,0.034489892921546056,9.219653813723673,0.03558769462913381,9.302288657610072,0.034489892921546056

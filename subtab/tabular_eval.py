@@ -144,8 +144,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=0.05)
     parser.add_argument("--decorrelation-weight", type=float, default=0.40)
     parser.add_argument("--probe-hidden-dim", type=int, default=256)
-    parser.add_argument("--probe-max-iter", type=int, default=200)
     parser.add_argument("--config-path", default=None)
+    parser.add_argument("--stargraph", action="store_true", help="Use StarGraphTab (Value-Attributed Star Graph with 100% Linear LightGCN Message Propagation)")
     parser.add_argument(
         "--device",
         default="auto",
@@ -163,12 +163,13 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def load_dataset_bundle(tabm_root: Path, dataset_name: str, seed: int) -> DatasetBundle:
+def load_dataset_bundle(tabm_root: Path, dataset_name: str, seed: int, split_tag: str = "-0-") -> DatasetBundle:
     if dataset_name not in TABM_DATASET_REGISTRY:
         raise KeyError(f"Unknown dataset '{dataset_name}'.")
     tabm_name, task_name = TABM_DATASET_REGISTRY[dataset_name]
+    tabm_name_split = tabm_name.replace("-0-", split_tag)
     prepared = load_tabm_prepared_dataset(
-        tabm_root / tabm_name,
+        tabm_root / tabm_name_split,
         task=task_name,
         seed=seed,
         num_policy='standard',
@@ -261,6 +262,7 @@ def train_supicl_model(
     weight_decay: float = 3e-4,
     batch_size: int = 256,
     device_name: str = "auto",
+    use_stargraph: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     set_seed(seed)
     if device_name == "cuda":
@@ -326,14 +328,24 @@ def train_supicl_model(
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     num_outputs = len(np.unique(bundle.y_train)) if bundle.task == "classification" else 1
-    model = SupervisedICLModel(
-        num_features=num_features,
-        num_outputs=num_outputs,
-        in_channels=in_channels,
-        d_token=d_token,
-        n_heads=n_heads,
-        n_layers=n_layers,
-    ).to(device)
+    if use_stargraph:
+        from src.models import StarGraphTabModel
+        model = StarGraphTabModel(
+            num_features=num_features,
+            num_outputs=num_outputs,
+            in_channels=in_channels,
+            d_token=d_token,
+            n_layers=n_layers,
+        ).to(device)
+    else:
+        model = SupervisedICLModel(
+            num_features=num_features,
+            num_outputs=num_outputs,
+            in_channels=in_channels,
+            d_token=d_token,
+            n_heads=n_heads,
+            n_layers=n_layers,
+        ).to(device)
 
     if bundle.task == "classification":
         criterion = nn.CrossEntropyLoss()
@@ -456,66 +468,80 @@ def train_supicl_model(
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-
     return best_valid_metrics_dict, test_metrics_dict
 
 
 def _run_single_dataset(dataset_name: str, args: argparse.Namespace) -> dict[str, Any]:
-    bundle = load_dataset_bundle(args.tabm_root, dataset_name, seed=args.seeds[0])
+    tabm_name, task_name = TABM_DATASET_REGISTRY[dataset_name]
 
-    if args.epochs is None:
-        epochs = REGRESSION_HYPERPARAMS["epochs"] if bundle.task == "regression" else 200
-    else:
-        epochs = args.epochs
+    # Detect all available splits (-0-, -1-, -2-) for TabM 1:1 benchmark protocol
+    available_splits = []
+    for split_tag in ["-0-", "-1-", "-2-"]:
+        target_dir = args.tabm_root / tabm_name.replace("-0-", split_tag)
+        if target_dir.exists():
+            available_splits.append(split_tag)
 
-    print(
-        f"Loaded {bundle.dataset_name}: train={bundle.x_train.shape[0]} "
-        f"valid={bundle.x_valid.shape[0]} test={bundle.x_test.shape[0]} "
-        f"features={bundle.x_train.shape[1]} task={bundle.task} epochs={epochs}"
-    )
+    if not available_splits:
+        available_splits = ["-0-"]
+
+    print(f"Dataset {dataset_name}: Detected splits = {available_splits}")
 
     run_rows: list[dict[str, Any]] = []
-    seed_bar = tqdm(list(enumerate(args.seeds)), desc="seeds")
-    for run_idx, seed in seed_bar:
-        seed_bar.set_postfix(seed=seed)
-        print(f"\nRun {run_idx + 1}/{len(args.seeds)} | seed={seed}")
+    total_runs = len(available_splits) * len(args.seeds)
+    run_counter = 0
 
-        valid_metrics_dict, test_metrics_dict = train_supicl_model(
-            bundle,
-            epochs=epochs,
-            seed=seed,
-            device_name=args.device,
-        )
+    for split_idx, split_tag in enumerate(available_splits):
+        for run_idx, seed in enumerate(args.seeds):
+            run_counter += 1
+            bundle = load_dataset_bundle(args.tabm_root, dataset_name, seed=seed, split_tag=split_tag)
 
-        for h in sorted(valid_metrics_dict.keys()):
-            h_valid = valid_metrics_dict[h]
-            h_test = test_metrics_dict[h]
-            print(f"[valid-{h}] {summarize_metrics(bundle.task, h_valid)}")
-            print(f"[test -{h}] {summarize_metrics(bundle.task, h_test)}")
+            if args.epochs is None:
+                epochs = REGRESSION_HYPERPARAMS["epochs"] if bundle.task == "regression" else 200
+            else:
+                epochs = args.epochs
 
-            run_rows.append(
-                {
-                    "Dataset": bundle.dataset_name,
-                    "Task": bundle.task,
-                    "Method": f"End2End-SupICL-{h}",
-                    "Run": run_idx,
-                    "Seed": seed,
-                    "Horizon": h,
-                    "ValidationScore": float(h_valid["score"]),
-                    "TestScore": float(h_test["score"]),
-                    "ValidationMetric": float(
-                        h_valid["accuracy"] if bundle.task == "classification" else h_valid["rmse"]
-                    ),
-                    "TestMetric": float(
-                        h_test["accuracy"] if bundle.task == "classification" else h_test["rmse"]
-                    ),
-                }
+            print(
+                f"\nRun {run_counter}/{total_runs} | Split={split_tag} | Seed={seed} | "
+                f"train={bundle.x_train.shape[0]} valid={bundle.x_valid.shape[0]} test={bundle.x_test.shape[0]}"
             )
+
+            valid_metrics_dict, test_metrics_dict = train_supicl_model(
+                bundle,
+                epochs=epochs,
+                seed=seed,
+                device_name=args.device,
+                use_stargraph=getattr(args, "stargraph", False),
+            )
+
+            for h in sorted(valid_metrics_dict.keys()):
+                h_valid = valid_metrics_dict[h]
+                h_test = test_metrics_dict[h]
+                print(f"[split{split_tag} valid-{h}] {summarize_metrics(bundle.task, h_valid)}")
+                print(f"[split{split_tag} test -{h}] {summarize_metrics(bundle.task, h_test)}")
+
+                run_rows.append(
+                    {
+                        "Dataset": bundle.dataset_name,
+                        "Task": bundle.task,
+                        "Method": f"End2End-SupICL-{h}",
+                        "Split": split_tag,
+                        "Seed": seed,
+                        "Horizon": h,
+                        "ValidationScore": float(h_valid["score"]),
+                        "TestScore": float(h_test["score"]),
+                        "ValidationMetric": float(
+                            h_valid["accuracy"] if bundle.task == "classification" else h_valid["rmse"]
+                        ),
+                        "TestMetric": float(
+                            h_test["accuracy"] if bundle.task == "classification" else h_test["rmse"]
+                        ),
+                    }
+                )
 
     runs_df = pd.DataFrame(run_rows)
     summary_rows = []
-    
-    # Calculate statistics grouped by each epoch horizon
+
+    # Calculate statistics grouped by each epoch horizon across all seeds and splits
     for method_grp, grp_df in runs_df.groupby("Method"):
         summary_df = grp_df.agg(
             {
@@ -527,8 +553,8 @@ def _run_single_dataset(dataset_name: str, args: argparse.Namespace) -> dict[str
         )
 
         summary_row = {
-            "Dataset": bundle.dataset_name,
-            "Task": bundle.task,
+            "Dataset": dataset_name,
+            "Task": task_name,
             "Method": method_grp,
             "ValidationScoreMean": float(summary_df.loc["mean", "ValidationScore"]),
             "ValidationScoreStd": float(summary_df.loc["std", "ValidationScore"]),

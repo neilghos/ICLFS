@@ -1,2 +1,0 @@
-Dataset,Task,Method,NumSelected,SelectionMode,ValidationScoreMean,ValidationScoreStd,TestScoreMean,TestScoreStd,ValidationMetricMean,ValidationMetricStd,TestMetricMean,TestMetricStd
-diamond,regression,ICL-SubTab-256,24,selection_ratio=0.9,-0.19219126238186127,0.03851727034091792,-0.18937136709128038,0.03525308269482904,0.19219126238186127,0.03851727034091792,0.18937136709128038,0.03525308269482904
