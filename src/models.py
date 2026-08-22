@@ -589,3 +589,229 @@ class SupervisedICLModel(nn.Module):
             return logits, recon_x
         else:
             return logits, None
+
+
+class StarGraphValueEmbedding(nn.Module):
+    """
+    Non-Linear Feature Value Embedding Layer for FeatureGraphTab.
+    Computes 3 parallel sub-representations per feature node:
+      1. Continuous multi-channel linear value projection (Quantile Norm + Quantile Uni + Raw)
+      2. Periodic Fourier frequency spectrum
+      3. Piecewise Linear Encoding (PLE) bin ramps
+    Fuses them into a single node tensor e_j^{(0)} in R^{d_token}.
+    """
+
+    def __init__(
+        self,
+        num_features: int,
+        in_channels: int = 3,
+        d_token: int = 128,
+        n_frequencies: int = 16,
+        n_bins: int = 32,
+    ):
+        super().__init__()
+        self.num_features = num_features
+        self.d_token = d_token
+
+        # 1. Multi-channel linear value projection
+        self.w_linear = nn.Linear(in_channels, d_token)
+
+        # 2. Periodic Fourier frequency spectrum
+        frequencies = 2.0 ** torch.arange(n_frequencies, dtype=torch.float32)
+        self.register_buffer("frequencies", frequencies)
+        self.w_fourier = nn.Linear(2 * n_frequencies, d_token)
+
+        # 3. Piecewise Linear Encoding (PLE) bin ramps
+        bin_edges = torch.linspace(-3.0, 3.0, n_bins + 1, dtype=torch.float32)
+        self.register_buffer("bin_edges", bin_edges)
+        self.w_ple = nn.Linear(n_bins, d_token)
+
+        # Feature ID embedding
+        self.feature_id_embed = nn.Embedding(num_features, d_token)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, None]:
+        # x: [B, D, in_channels]
+        batch_size, num_features, in_channels = x.shape
+
+        # 1. Continuous Linear Value Representation
+        v_linear = self.w_linear(x)  # [B, D, d_token]
+
+        # Use primary standardized raw value channel (channel -1)
+        raw_val = x[:, :, -1]  # [B, D]
+
+        # 2. Periodic Fourier Frequency Spectrum
+        freq_args = raw_val.unsqueeze(-1) * self.frequencies.unsqueeze(0).unsqueeze(0)
+        fourier_feats = torch.cat([torch.cos(2.0 * math.pi * freq_args), torch.sin(2.0 * math.pi * freq_args)], dim=-1)
+        v_fourier = self.w_fourier(fourier_feats)  # [B, D, d_token]
+
+        # 3. Piecewise Linear Encoding (PLE) Ramp
+        val_clamped = torch.clamp(raw_val, min=float(self.bin_edges[0]), max=float(self.bin_edges[-1]))
+        val_expanded = val_clamped.unsqueeze(-1)  # [B, D, 1]
+        b_left = self.bin_edges[:-1].unsqueeze(0).unsqueeze(0)
+        b_right = self.bin_edges[1:].unsqueeze(0).unsqueeze(0)
+        b_width = b_right - b_left
+        ple_ramps = torch.clamp((val_expanded - b_left) / b_width, min=0.0, max=1.0)
+        v_ple = self.w_ple(ple_ramps)  # [B, D, d_token]
+
+        # Feature ID embedding
+        feature_ids = torch.arange(num_features, device=x.device)
+        id_embed = self.feature_id_embed(feature_ids).unsqueeze(0)  # [1, D, d_token]
+
+        # Fused Feature Node Embedding e_j^{(0)}
+        e_features = v_linear + v_fourier + v_ple + id_embed  # [B, D, d_token]
+
+        return e_features, None
+
+
+class MultiHeadLightGCNPropagation(nn.Module):
+    """
+    Multi-Head LightGCN Message Propagation over H=8 Parallel Subspace Feature Graphs.
+    Projects node embeddings into H=8 heads, computes sample-adaptive & correlation-attributed 
+    adjacency matrices A^{(h)} for each head, and performs 100% linear LightGCN graph convolutions.
+    """
+
+    def __init__(self, d_token: int = 128, n_heads: int = 8, n_layers: int = 3):
+        super().__init__()
+        self.d_token = d_token
+        self.n_heads = n_heads
+        self.d_head = d_token // n_heads
+        self.n_layers = n_layers
+        self.scale = 1.0 / (self.d_head ** 0.5)
+
+        self.w_q = nn.Linear(d_token, d_token)
+        self.w_k = nn.Linear(d_token, d_token)
+        self.w_v = nn.Linear(d_token, d_token)
+        self.w_out = nn.Linear(d_token, d_token)
+
+        self.layer_weights = [1.0 / (n_layers + 1)] * (n_layers + 1)
+        self.register_buffer("A_norm", None)
+
+    def set_adj_matrix(self, A_norm: torch.Tensor):
+        self.register_buffer("A_norm", A_norm)
+
+    def forward(self, e_features: torch.Tensor) -> torch.Tensor:
+        # e_features: [B, D, d_token]
+        batch_size, num_features, _ = e_features.shape
+
+        # Multi-Head Query, Key, Value projections: [B, H, D, d_head]
+        q = self.w_q(e_features).view(batch_size, num_features, self.n_heads, self.d_head).transpose(1, 2)
+        k = self.w_k(e_features).view(batch_size, num_features, self.n_heads, self.d_head).transpose(1, 2)
+        v = self.w_v(e_features).view(batch_size, num_features, self.n_heads, self.d_head).transpose(1, 2)
+
+        # Dynamic sample-adaptive similarity matrix for each head: [B, H, D, D]
+        sim = torch.matmul(q, k.transpose(-2, -1)) * self.scale  # [B, H, D, D]
+
+        # Blend with static correlation matrix A_norm if available
+        if self.A_norm is not None:
+            A_static = self.A_norm.unsqueeze(0).unsqueeze(0)  # [1, 1, D, D]
+            sim = sim + A_static
+
+        # Softmax normalize adjacency matrix per head
+        A_head = torch.softmax(sim, dim=-1)  # [B, H, D, D]
+
+        head_states = [v]
+        curr_v = v
+
+        for _ in range(self.n_layers):
+            # Pure linear LightGCN graph convolution across all H heads simultaneously:
+            # A_head @ curr_v -> [B, H, D, d_head]
+            next_v = torch.matmul(A_head, curr_v)
+            curr_v = next_v
+            head_states.append(curr_v)
+
+        # Multi-layer LightGCN linear combination
+        v_final = torch.zeros_like(v)
+        for layer_idx, state in enumerate(head_states):
+            v_final = v_final + self.layer_weights[layer_idx] * state
+
+        # Reshape back to [B, D, d_token] and project
+        v_concat = v_final.transpose(1, 2).contiguous().view(batch_size, num_features, self.d_token)
+        return self.w_out(v_concat)
+
+
+class StarGraphTabModel(nn.Module):
+    """
+    MultiHeadGraphTab Architecture.
+    Pipeline:
+      1. Non-Linear Value Embedding Layer (Raw + Fourier + PLE)
+      2. Multi-Head LightGCN Message Propagation (H=8 parallel graph heads)
+      3. Per-Feature Token Residual FFN Layer
+      4. Learned Attentive Readout Pool & Non-Linear Prediction Head
+    """
+
+    def __init__(
+        self,
+        num_features: int,
+        num_outputs: int = 1,
+        in_channels: int = 3,
+        d_token: int = 128,
+        n_heads: int = 8,
+        n_layers: int = 3,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.embedding = StarGraphValueEmbedding(
+            num_features=num_features,
+            in_channels=in_channels,
+            d_token=d_token,
+        )
+        self.gnn = MultiHeadLightGCNPropagation(d_token=d_token, n_heads=n_heads, n_layers=n_layers)
+
+        # Per-Feature Token Residual FFN Layer
+        self.feature_ffn = nn.Sequential(
+            nn.Linear(d_token, 2 * d_token),
+            nn.SiLU(),
+            nn.Dropout(dropout),
+            nn.Linear(2 * d_token, d_token),
+        )
+
+        # Learned Attentive Feature Readout Pool
+        self.attn_pool_weights = nn.Linear(d_token, 1)
+
+        # Non-Linear Prediction Head
+        sample_dim = 2 * d_token
+        self.head = nn.Sequential(
+            nn.Linear(sample_dim, 512),
+            nn.BatchNorm1d(512),
+            nn.SiLU(),
+            nn.Dropout(dropout),
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.SiLU(),
+            nn.Dropout(dropout),
+            nn.Linear(256, num_outputs),
+        )
+
+        # Feature Reconstruction Decoder Head: per-feature decoder [B, D, d_token] -> [B, D]
+        self.recon_head = nn.Sequential(
+            nn.Linear(d_token, d_token // 2),
+            nn.ReLU(),
+            nn.Linear(d_token // 2, 1),
+        )
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if mask is not None:
+            x_input = x.clone()
+            x_input[:, :, -1] = x[:, :, -1] * (1.0 - mask)
+        else:
+            x_input = x
+
+        e_features, _ = self.embedding(x_input)
+        e_features_final = self.gnn(e_features)  # [B, D, d_token]
+
+        # 1. Per-Feature Token Residual FFN Pass
+        e_features_processed = e_features_final + self.feature_ffn(e_features_final)  # [B, D, d_token]
+
+        # 2. Learned Attentive Readout Pool
+        attn_scores = torch.softmax(self.attn_pool_weights(e_features_processed), dim=1)  # [B, D, 1]
+        attn_pool = (attn_scores * e_features_processed).sum(dim=1)  # [B, d_token]
+        max_pool = e_features_processed.max(dim=1).values  # [B, d_token]
+        z_sample = torch.cat([attn_pool, max_pool], dim=1)  # [B, 2 * d_token]
+
+        logits = self.head(z_sample)
+
+        if self.training:
+            recon_x = self.recon_head(e_features_processed).squeeze(-1)  # [B, D]
+            return logits, recon_x
+        else:
+            return logits, None
