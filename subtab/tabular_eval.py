@@ -337,6 +337,23 @@ def train_supicl_model(
             d_token=d_token,
             n_layers=n_layers,
         ).to(device)
+
+        # Pre-compute empirical Pearson correlation matrix with LightGCN Symmetric Normalization: \\tilde{A} = D^{-1/2} W D^{-1/2}
+        try:
+            x_raw_tr = bundle.x_train  # [N, D]
+            corr_matrix = np.abs(np.corrcoef(x_raw_tr, rowvar=False))
+            np.fill_diagonal(corr_matrix, 0.0)
+            corr_matrix = np.nan_to_num(corr_matrix, nan=0.0)
+
+            degrees = corr_matrix.sum(axis=1)
+            degrees[degrees < 1e-6] = 1.0
+            deg_inv_sqrt = 1.0 / np.sqrt(degrees)
+
+            A_norm_np = deg_inv_sqrt[:, None] * corr_matrix * deg_inv_sqrt[None, :]
+            A_norm_tensor = torch.tensor(A_norm_np, dtype=torch.float32, device=device)
+            model.gnn.set_adj_matrix(A_norm_tensor)
+        except Exception as e:
+            print(f"Warning: Failed to compute correlation matrix ({e}). Using uniform fallback.")
     else:
         model = SupervisedICLModel(
             num_features=num_features,
